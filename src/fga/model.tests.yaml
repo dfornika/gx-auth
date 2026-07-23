@@ -1,0 +1,212 @@
+# OpenFGA model tests. Run offline (no server) with:
+#   docker run --rm -v "$PWD/fga:/work:ro" openfga/cli model test --tests /work/model.tests.yaml
+# or `just fga-model-test`. See docs/002 for the model these assert.
+name: gx-auth authorization model
+
+model_file: ./model.fga
+
+# ---------------------------------------------------------------------------
+# Fixture graph (applies to every test below):
+#
+#   project:root ──parent──▶ project:child          (root is top-level)
+#     anne  = admin(root)     -> inherits admin of child (downward)
+#     bob   = member(root)    -> inherits member of child
+#     erin  = viewer(root) + access_level_ok(root, user_level=5)
+#     frank = access_level_ok(root, user_level=5)   [no role]
+#     carol = viewer(child)   [direct, does NOT reach root]
+#     grace = member(group:lab-x); group:lab-x#member = viewer(child)
+#     dave  = nothing
+#
+#   sample:s1            -> project:child
+#   sample:leveled1      -> project:root   (used for SMS leveled checks)
+#   analysis_output:a1   -> project:root   (deep leaf, flattened to project)
+# ---------------------------------------------------------------------------
+tuples:
+  - user: project:root
+    relation: parent
+    object: project:child
+
+  - user: user:anne
+    relation: admin
+    object: project:root
+  - user: user:bob
+    relation: member
+    object: project:root
+  - user: user:erin
+    relation: viewer
+    object: project:root
+  - user: user:erin
+    relation: access_level_ok
+    object: project:root
+    condition:
+      name: meets_access_level
+      context:
+        user_level: 5
+  - user: user:frank
+    relation: access_level_ok
+    object: project:root
+    condition:
+      name: meets_access_level
+      context:
+        user_level: 5
+
+  - user: user:carol
+    relation: viewer
+    object: project:child
+
+  - user: user:grace
+    relation: member
+    object: group:lab-x
+  - user: group:lab-x#member
+    relation: viewer
+    object: project:child
+
+  - user: project:child
+    relation: project
+    object: sample:s1
+  - user: project:root
+    relation: project
+    object: sample:leveled1
+  - user: project:root
+    relation: project
+    object: analysis_output:a1
+
+tests:
+  - name: admin-has-full-access-and-inherits-down-the-tree
+    check:
+      - user: user:anne
+        object: project:root
+        assertions:
+          can_administer: true
+          can_edit: true
+          can_view: true
+      - user: user:anne
+        object: project:child
+        assertions:
+          can_administer: true
+          can_edit: true
+          can_view: true
+
+  - name: member-can-edit-but-not-administer-and-inherits-down
+    check:
+      - user: user:bob
+        object: project:root
+        assertions:
+          can_administer: false
+          can_edit: true
+          can_view: true
+      - user: user:bob
+        object: project:child
+        assertions:
+          can_administer: false
+          can_edit: true
+          can_view: true
+
+  - name: inheritance-is-downward-only
+    check:
+      # carol is a direct viewer of child; that must NOT grant access to root
+      - user: user:carol
+        object: project:child
+        assertions:
+          can_view: true
+          can_edit: false
+      - user: user:carol
+        object: project:root
+        assertions:
+          can_view: false
+
+  - name: unrelated-user-has-no-access
+    check:
+      - user: user:dave
+        object: project:root
+        assertions:
+          can_view: false
+      - user: user:dave
+        object: sample:s1
+        assertions:
+          can_view: false
+
+  - name: leaf-resources-inherit-from-their-project
+    check:
+      # sample:s1 is under child; anne (admin via root) and carol (viewer of child) see it
+      - user: user:anne
+        object: sample:s1
+        assertions:
+          can_view: true
+          can_edit: true
+      - user: user:carol
+        object: sample:s1
+        assertions:
+          can_view: true
+          can_edit: false
+      # analysis_output flattened directly to root; bob (member of root) can edit
+      - user: user:bob
+        object: analysis_output:a1
+        assertions:
+          can_view: true
+          can_edit: true
+
+  - name: group-membership-grants-access
+    check:
+      - user: user:grace
+        object: project:child
+        assertions:
+          can_view: true
+          can_edit: false
+      - user: user:grace
+        object: sample:s1
+        assertions:
+          can_view: true
+
+  - name: sms-access-level-gate-passes-when-level-is-sufficient
+    check:
+      # erin is viewer AND access_level_ok(5); required 3 and 5 pass, 7 fails
+      - user: user:erin
+        object: sample:leveled1
+        context:
+          required_level: 3
+        assertions:
+          can_view_leveled: true
+      - user: user:erin
+        object: sample:leveled1
+        context:
+          required_level: 5
+        assertions:
+          can_view_leveled: true
+      - user: user:erin
+        object: sample:leveled1
+        context:
+          required_level: 7
+        assertions:
+          can_view_leveled: false
+
+  - name: sms-access-level-requires-both-role-and-level
+    check:
+      # frank has the level but no viewing role -> denied
+      - user: user:frank
+        object: sample:leveled1
+        context:
+          required_level: 1
+        assertions:
+          can_view_leveled: false
+      # bob has a viewing role (member->viewer) but no access_level_ok -> denied
+      - user: user:bob
+        object: sample:leveled1
+        context:
+          required_level: 1
+        assertions:
+          can_view_leveled: false
+
+  - name: list-objects-returns-all-visible-leaves
+    list_objects:
+      # erin is viewer of root -> viewer of child (downward) -> sees both samples
+      - user: user:erin
+        type: sample
+        assertions:
+          can_view:
+            - sample:leveled1
+            - sample:s1
+      - user: user:dave
+        type: sample
+        assertions:
+          can_view: []

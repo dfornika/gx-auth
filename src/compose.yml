@@ -1,0 +1,98 @@
+name: gx-auth
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: gxauth
+      POSTGRES_USER: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  openfga-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: openfga
+      POSTGRES_USER: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - openfga-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  openfga-migrate:
+    image: openfga/openfga:latest
+    command: migrate
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://postgres@openfga-db:5432/openfga?sslmode=disable
+    depends_on:
+      openfga-db:
+        condition: service_healthy
+
+  openfga:
+    image: openfga/openfga:latest
+    command: run
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://postgres@openfga-db:5432/openfga?sslmode=disable
+      # The built-in Playground is deprecated and binds to 127.0.0.1 *inside*
+      # the container, so a published port can't reach it. Use the `fga` CLI
+      # (see justfile / src/fga/README.md) or the hosted playground instead.
+      OPENFGA_PLAYGROUND_ENABLED: "false"
+    ports:
+      - "8080:8080"  # HTTP API
+      - "8081:8081"  # gRPC API
+    depends_on:
+      openfga-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=:8081"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build: .
+    command: uv run -m manage runserver 0.0.0.0:8000
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://postgres@db:5432/gxauth
+      FGA_API_URL: http://openfga:8080
+    volumes:
+      - .:/src:cached
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      openfga:
+        condition: service_started
+
+  # Ephemeral container for `just manage`, `just test`, etc. No ports.
+  utility:
+    build: .
+    profiles: ["utility"]
+    entrypoint: [""]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://postgres@db:5432/gxauth
+      FGA_API_URL: http://openfga:8080
+    volumes:
+      - .:/src:cached
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:
+  openfga-db-data:

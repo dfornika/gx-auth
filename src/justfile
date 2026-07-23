@@ -1,0 +1,132 @@
+set dotenv-load := true
+
+# Show list of available commands
+@_default:
+    just --list
+
+# One-time setup: create .env, lock deps, build images
+bootstrap:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f ".env" ]; then cp .env-dist .env && echo ".env created"; fi
+    if [ ! -f "uv.lock" ]; then uv lock && echo "uv.lock created"; fi
+    docker compose build --pull
+
+# Lock dependencies
+@lock *ARGS:
+    uv lock {{ ARGS }}
+
+# Build containers
+build *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f ".env" ]; then cp .env-dist .env && echo ".env created"; fi
+    if [ ! -f "uv.lock" ]; then uv lock && echo "uv.lock created"; fi
+    docker compose build {{ ARGS }}
+
+# Start services (detached by default)
+@up *ARGS="--detach":
+    docker compose up {{ ARGS }}
+
+# Stop and remove containers
+@down *ARGS:
+    docker compose down {{ ARGS }}
+
+# Recreate a service to pick up .env changes.
+# NOTE: `docker compose restart` does NOT reload .env — use this after editing it.
+@reload service='web':
+    docker compose up -d --force-recreate {{ service }}
+
+# Follow logs
+@logs *ARGS="--follow":
+    docker compose logs {{ ARGS }}
+
+# Run a Django management command in the utility container
+@manage *ARGS:
+    docker compose run --rm --no-deps utility uv run -m manage {{ ARGS }}
+
+# Make and apply migrations
+@makemigrations *ARGS:
+    just manage makemigrations {{ ARGS }}
+@migrate *ARGS:
+    just manage migrate {{ ARGS }}
+
+# Create a Django superuser (password 'admin' for local dev)
+@createsuperuser username='admin' email='admin@localhost':
+    docker compose run --rm --entrypoint "" \
+        -e DJANGO_SUPERUSER_USERNAME={{ username }} \
+        -e DJANGO_SUPERUSER_EMAIL={{ email }} \
+        -e DJANGO_SUPERUSER_PASSWORD=admin \
+        utility uv run -m manage createsuperuser --noinput
+
+# Run the test suite
+@test *ARGS:
+    docker compose run --rm --no-deps utility uv run pytest {{ ARGS }}
+
+# Lint / format
+@lint *ARGS:
+    uv run ruff check {{ ARGS }} .
+@fmt:
+    uv run ruff format .
+
+# Open a shell in the utility container
+@console:
+    docker compose run --rm --no-deps utility /bin/bash
+
+# --- OpenFGA -----------------------------------------------------------------
+# These run the openfga CLI against the running `openfga` service on the compose
+# network. Requires `just up` first.
+
+_FGA_NET := "gx-auth_default"
+_FGA_URL := "http://openfga:8080"
+
+# Create a store; copy the printed id into .env as FGA_STORE_ID
+@fga-store-create name='gx-auth':
+    docker run --rm --network {{ _FGA_NET }} openfga/cli \
+        store create --api-url {{ _FGA_URL }} --name {{ name }}
+
+# Validate model.fga parses
+@fga-model-validate:
+    docker run --rm -v "{{ justfile_directory() }}/fga:/work:ro" \
+        openfga/cli model validate --file /work/model.fga
+
+# Run the offline model tests (no server needed)
+@fga-model-test:
+    docker run --rm -v "{{ justfile_directory() }}/fga:/work:ro" \
+        openfga/cli model test --tests /work/model.tests.yaml
+
+# List authorization models in the store
+@fga-model-list:
+    docker run --rm --network {{ _FGA_NET }} openfga/cli \
+        model list --api-url {{ _FGA_URL }} --store-id "${FGA_STORE_ID}"
+
+# Write a relationship tuple, e.g. `just fga-tuple-write user:anne admin project:root`
+@fga-tuple-write user relation object:
+    docker run --rm --network {{ _FGA_NET }} openfga/cli \
+        tuple write --api-url {{ _FGA_URL }} --store-id "${FGA_STORE_ID}" \
+        {{ user }} {{ relation }} {{ object }}
+
+# Check a relationship, e.g. `just fga-check user:anne can_view project:root`
+@fga-check user relation object:
+    docker run --rm --network {{ _FGA_NET }} openfga/cli \
+        query check --api-url {{ _FGA_URL }} --store-id "${FGA_STORE_ID}" \
+        {{ user }} {{ relation }} {{ object }}
+
+# Batch-import tuples from a CSV/JSON/YAML file (idempotent).
+# e.g. `just fga-tuple-import fga/seed.tuples.csv`
+fga-tuple-import file:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    src="$(realpath '{{ file }}')"
+    name="$(basename "$src")"
+    docker run --rm --network {{ _FGA_NET }} -v "${src}:/data/${name}:ro" \
+        openfga/cli tuple import --api-url {{ _FGA_URL }} --store-id "${FGA_STORE_ID}" \
+        --file "/data/${name}" --on-duplicate ignore
+
+# Load the bundled demo fixture (matches fga/model.tests.yaml)
+fga-seed: (fga-tuple-import "fga/seed.tuples.csv")
+
+# Write model.fga to the store (prints the new authorization model id)
+@fga-model-write:
+    docker run --rm --network {{ _FGA_NET }} -v "{{ justfile_directory() }}/fga:/work:ro" \
+        openfga/cli model write --api-url {{ _FGA_URL }} --store-id "${FGA_STORE_ID}" --file /work/model.fga
