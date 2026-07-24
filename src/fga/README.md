@@ -37,7 +37,7 @@ just fga-seed
 ```
 
 Then the live store answers the same way the offline tests assert, e.g.
-`just fga-check user:anne can_view project:root` → `allowed: true`.
+`just fga-check user:alice can_delete project:demo` → `allowed: true`.
 
 Batch-import any CSV/JSON/YAML file with `just fga-tuple-import <path>`. The CSV
 header is:
@@ -46,9 +46,10 @@ header is:
 user_type,user_id,user_relation,relation,object_type,object_id,condition_name,condition_context
 ```
 
-`user_relation` expresses usersets (e.g. a `group:lab-x#member` grant);
-`condition_name` + `condition_context` carry a condition (e.g. the SMS access
-level: `meets_access_level`, `{"user_level":5}`).
+For the current RBAC model only the first six columns are used. The optional
+`user_relation` (usersets, e.g. `group:lab-x#member`) and
+`condition_name`/`condition_context` (ABAC conditions) support the "growing from
+here" additions in docs/002.
 
 ## Testing the model
 
@@ -59,8 +60,7 @@ offline (no server needed) with:
 just fga-model-test
 ```
 
-It covers hierarchy inheritance (downward only), role nesting, group grants,
-leaf→project inheritance, and the SMS access-level condition (level sufficient /
-too low / role-without-level / level-without-role). Extend it whenever you touch
-`model.fga` — it is the safety net for model changes (see docs/003 "Failure
-modes"). `just fga-model-validate` just checks the DSL parses.
+It covers the RBAC matrix (admin/member/viewer → can_view/create/edit/delete/
+administer) and leaf resources inheriting from their project. Extend it whenever
+you touch `model.fga` — it is the safety net for model changes (see docs/003
+"Failure modes"). `just fga-model-validate` just checks the DSL parses.

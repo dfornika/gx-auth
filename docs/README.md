@@ -16,8 +16,9 @@ provider (AWS Cognito today, Azure Entra ID as a possible future pivot).
    Why authN and authZ are split, the target topology, and the cloud-neutral
    constraint that shapes everything.
 2. [002 — Authorization model](./002-authorization-model.md)
-   The OpenFGA ReBAC model: the shared `project` hierarchy, sample containment,
-   roles, and the SMS numeric access-level rule expressed as a condition.
+   Conventional RBAC in OpenFGA: roles (admin/member/viewer) on projects, a
+   permission matrix derived from them, and resources inheriting from their
+   project. Includes a "growing from here" section for later additions.
 3. [003 — Integration & tuple sync](./003-integration-and-sync.md)
    How services call `Check` at their enforcement points, and how relationship
    tuples are kept in sync with resources that live in each service's own DB.

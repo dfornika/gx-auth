@@ -1,111 +1,46 @@
 model
   schema 1.1
 
-# ---------------------------------------------------------------------------
-# Identity
-# ---------------------------------------------------------------------------
+# Role-based access control (RBAC) with a nested project hierarchy.
+# You assign USERS to ROLES on a project; PERMISSIONS are derived from roles.
+# A role granted on a project flows DOWN to its descendant projects.
+# See docs/002-authorization-model.md.
 
 type user
 
-type group
-  relations
-    # A whole team can be granted a role in one tuple: project:P#member@group:lab-x#member
-    define member: [user]
-
-# ---------------------------------------------------------------------------
-# Project — shared, recursive-capable.
-# SMS uses it flat (never writes a `parent` tuple); GX Core builds a tree.
-# ---------------------------------------------------------------------------
-
 type project
   relations
+    # parent project (top-level projects have no parent tuple).
+    # Application enforces the max nesting depth and forbids cycles at write time;
+    # it stays well under OpenFGA's resolve-node-limit (default 25).
     define parent: [project]
 
-    # Roles: direct grant OR inherited down the hierarchy. Roles nest:
-    # member includes admin, viewer includes member.
-    define admin: [user, group#member] or admin from parent
-    define member: [user, group#member] or admin or member from parent
-    define viewer: [user, group#member] or member or viewer from parent
+    # --- role assignments: the only thing you manage ---
+    # Each role inherits itself from the parent project (downward inheritance).
+    define admin: [user] or admin from parent
+    define member: [user] or member from parent
+    define viewer: [user] or viewer from parent
 
-    # SMS numeric access-level gate. Separate grant carrying the user's level,
-    # independent of role. Written as:
-    #   project:P#access_level_ok@user:U (with meets_access_level, user_level: N)
-    define access_level_ok: [user with meets_access_level]
-
-    # Permissions the apps Check:
+    # --- permissions: derived from roles; what apps Check ---
+    define can_view: admin or member or viewer
+    define can_create: admin or member
+    define can_edit: admin or member
+    define can_delete: admin
     define can_administer: admin
-    define can_edit: member
-    define can_view: viewer
-    # SMS-only: role AND sufficient numeric level. Pass required_level in the
-    # Check context; the sample's minimum comes from the calling service's DB.
-    define can_view_leveled: viewer and access_level_ok
 
-# ---------------------------------------------------------------------------
-# Leaf resources — FLATTENED: each carries a direct `project` pointer and
-# inherits permissions from it (see docs/002 "Flatten vs. chain").
-# GX Core services Check can_view / can_edit; SMS may Check can_view_leveled.
-# ---------------------------------------------------------------------------
+# Resources belong to a project and inherit its permissions. This adds no
+# management burden — you still only ever assign roles on the project.
 
 type sample
   relations
     define project: [project]
-    define can_administer: can_administer from project
-    define can_edit: can_edit from project
     define can_view: can_view from project
-    define can_view_leveled: can_view_leveled from project
-
-type biosample
-  relations
-    define project: [project]
     define can_edit: can_edit from project
-    define can_view: can_view from project
-
-type library
-  relations
-    define project: [project]
-    define can_edit: can_edit from project
-    define can_view: can_view from project
-
-type sequenced_library
-  relations
-    define project: [project]
-    define can_edit: can_edit from project
-    define can_view: can_view from project
-
-type consensus_sequence
-  relations
-    define project: [project]
-    define can_edit: can_edit from project
-    define can_view: can_view from project
-
-type assembly
-  relations
-    define project: [project]
-    define can_edit: can_edit from project
-    define can_view: can_view from project
-
-type alignment
-  relations
-    define project: [project]
-    define can_edit: can_edit from project
-    define can_view: can_view from project
-
-type analysis_run
-  relations
-    define project: [project]
-    define can_edit: can_edit from project
-    define can_view: can_view from project
+    define can_delete: can_delete from project
 
 type analysis_output
   relations
     define project: [project]
-    define can_edit: can_edit from project
     define can_view: can_view from project
-
-# ---------------------------------------------------------------------------
-# Conditions (ABAC headroom)
-# ---------------------------------------------------------------------------
-
-condition meets_access_level(user_level: int, required_level: int) {
-  user_level >= required_level
-}
+    define can_edit: can_edit from project
+    define can_delete: can_delete from project

@@ -1,157 +1,113 @@
 # 002 — Authorization model
 
-This is the OpenFGA (ReBAC) model for the platform. The canonical, machine-usable
-version lives at [`src/fga/model.fga`](../src/fga/model.fga); this document
-explains the design behind it.
+The current model is **role-based access control (RBAC)** with a **nested project
+hierarchy**, expressed in OpenFGA. The canonical version is
+[`src/fga/model.fga`](../src/fga/model.fga); this document explains it.
 
-## Principles
+## The one rule to hold in your head
 
-- **One store, one model.** A single OpenFGA store with shared identity types
-  (`user`, `group`) and a shared `project` type, plus service-specific resource
-  types. This is what makes it a plane that *spans* services rather than two
-  isolated silos.
-- **Model roles and membership in FGA; keep pure-local computation in the app.**
-  FGA owns the things worth sharing across services (roles, hierarchy, sharing).
-  Purely local comparisons (e.g. SMS field-level masking) stay in the service.
-- **Flatten containment where the data allows.** Prefer a denormalized `project`
-  pointer on leaf resources over deep parent chains — fewer hops per `Check`, and
-  a much smaller tuple-sync surface. See "Flatten vs. chain" below.
+**You assign users to *roles*; you never assign *permissions*.** Permissions are
+computed from roles. A role granted on a project also flows **down** to that
+project's descendants. So the management surface is just two operations: assign a
+role to a user on a project, and (when creating a sub-project) set its parent.
 
-## The shared `project` type unifies SMS and GX Core
-
-Some services have flat project structure; GX Core has a recursive hierarchy. One recursive-capable
-`project` type covers both — services with flat project structure simply never write a `parent` tuple, so a flat
-project is just a top-level project with no children. The three roles
-(`admin` / `member` / `viewer`) line up across both services.
+## Roles, permissions, and inheritance
 
 ```
 type project
   relations
-    define parent: [project]
+    define parent: [project]                       # top-level projects have no parent
 
-    # roles — direct grant OR inherited down the hierarchy
-    define admin:  [user, group#member] or admin from parent
-    define member: [user, group#member] or admin or member from parent
-    define viewer: [user, group#member] or member or viewer from parent
+    # role assignments — each role inherits itself from the parent (downward)
+    define admin:  [user] or admin from parent
+    define member: [user] or member from parent
+    define viewer: [user] or viewer from parent
 
-    # SMS numeric access-level gate (separate grant carrying the user's level)
-    define access_level_ok: [user with meets_access_level]
-
-    # permissions the apps actually Check
+    # permissions — derived from roles; what apps Check
+    define can_view: admin or member or viewer
+    define can_create: admin or member
+    define can_edit: admin or member
+    define can_delete: admin
     define can_administer: admin
-    define can_edit:       member
-    define can_view:       viewer
-    define can_view_leveled: viewer and access_level_ok
 ```
 
-Notes:
+| permission | admin | member | viewer |
+|---|:--:|:--:|:--:|
+| can_view | ✓ | ✓ | ✓ |
+| can_create | ✓ | ✓ | |
+| can_edit | ✓ | ✓ | |
+| can_delete | ✓ | | |
+| can_administer | ✓ | | |
 
-- `admin from parent` etc. give **downward inheritance**: an admin of a parent
-  project is an admin of every descendant, recursively, with zero per-child
-  tuples. That is GX Core's "access via membership in the project hierarchy."
-- Roles nest: `member` includes `admin`, `viewer` includes `member`.
-- `[group#member]` lets a whole team be granted a role in one tuple — see
-  "Groups" below.
+`admin from parent` means "anyone who is admin of this project's parent." Because
+the parent is itself a project with the same rule, roles recurse up the tree, so
+a grant on an ancestor reaches every descendant.
 
-## Sample containment (GX Core leaf resources)
+## Managing it
 
-Every leaf resource inherits its permissions from its container. The minimal
-pattern per type is three lines:
+```bash
+just fga-tuple-write user:anne member project:1        # assign a role
+just fga-tuple-write project:1 parent project:2        # project:2's parent is project:1
+just fga-check       user:anne can_edit project:2      # -> true (inherited from project:1)
+```
+
+Two write-time rules the **application** enforces (not OpenFGA):
+
+- **Max nesting depth** — GX Core caps this (≈5, hard cap ~8–10). This is a
+  business rule; it stays far under OpenFGA's `resolve-node-limit` (default 25),
+  so no engine tuning is needed.
+- **No cycles** — never set a project's parent to one of its own descendants.
+
+## The conceptual cost (go in eyes-open)
+
+With hierarchy, **permissions are no longer local to a single project.** "Who can
+edit project X" may be answered by a role granted several levels up. Consequences:
+
+- Removing a user's role on a child does **not** revoke access if they still hold
+  a role on an ancestor — "why can they still see this?" becomes a walk up the tree.
+- Re-parenting a project (change its `parent` tuple) instantly changes access for
+  everything beneath it.
+
+That is the deliberate trade: grant once high in the tree and it covers everything
+below, in exchange for effective permissions not being obvious from one node.
+
+## Resources inherit from their project
+
+`sample` and `analysis_output` belong to a project and inherit its permissions —
+and since the project inherits from its ancestors, resources transitively pick up
+ancestor roles too. No extra management; you still only assign roles on projects.
 
 ```
 type sample
   relations
     define project: [project]
-    define can_view:       can_view from project
-    define can_edit:       can_edit from project
-    define can_administer: can_administer from project
+    define can_view: can_view from project
+    define can_edit: can_edit from project
+    define can_delete: can_delete from project
 ```
 
-`biosample`, `library`, `sequenced_library`, `consensus_sequence`, `assembly`,
-`alignment`, `analysis_run`, and `analysis_output` follow the same shape.
+## What apps Check
 
-### Flatten vs. chain
+| Question | Call |
+|---|---|
+| may U edit this project? | `Check(U, can_edit, project:X)` |
+| may U view this sample? | `Check(U, can_view, sample:X)` |
+| may U manage members? | `Check(U, can_administer, project:X)` |
+| which projects can U see? | `ListObjects(U, can_view, project)` — spans the subtree |
+| which samples can U see? | `ListObjects(U, can_view, sample)` |
 
-GX Core's containment is deep:
-`analysis_output → analysis_run → sequenced_library → library → biosample → sample → project`.
-Two ways to model it:
+`ListObjects` for a user with a role high in the tree returns the whole subtree
+beneath it — cheap for modest trees, and the main thing to watch at large fan-out
+(see docs/003).
 
-| | Chain | Flatten (recommended) |
-|---|---|---|
-| Each leaf points at | its immediate container | directly at its `project` |
-| `Check` on a deep leaf | ~6 hops of resolution | 1 hop |
-| Tuple-sync surface | a tuple per parent link | one `project` tuple per leaf |
-| Cost | slower checks, more tuples to keep in sync | must rewrite the pointer if a resource is re-parented (rare in genomics) |
+## Growing from here (when you're ready)
 
-Because a sample essentially never moves projects once created, we **flatten**:
-write a direct `project` pointer on each leaf and inherit straight from the
-project. This is as much a *sync-cost* decision as a latency one (doc 003).
+Additive, independently-versioned changes that don't alter how roles→permissions
+or inheritance work:
 
-## Numeric access levels → a condition
+- **Teams/groups** — a `group` type so a whole team can be granted a role in one
+  tuple (`define member: [user, group#member] or member from parent`).
+- **Attribute conditions (ABAC)** — OpenFGA conditions to gate a relation on
+  request-time context (e.g. a numeric access level, embargo dates, consent codes).
 
-Some systems give each user an integer **access level** on a project (independent of
-their role), and each sample a **minimum access level**. A user may view a sample
-when their level ≥ the sample's minimum, *and* they hold a viewing role.
-
-Modeled with an OpenFGA **condition** whose parameters come partly from the
-stored tuple and partly from the check-time context:
-
-```
-condition meets_access_level(user_level: int, required_level: int) {
-  user_level >= required_level
-}
-```
-
-- **Grant time:** write `project:P#access_level_ok@user:U` with the condition and
-  `{user_level: 5}` baked into the tuple. The role (`viewer`, etc.) is a
-  *separate* tuple — mirroring "level is independent of role".
-- **Check time:** Service (which knows the sample's minimum from its own DB) calls
-  `Check(user:U, can_view_leveled, sample:S, context={required_level: 3})`.
-  `can_view_leveled = viewer AND access_level_ok`, so both the role and the
-  numeric gate must pass.
-
-### Recommendation: keep other services numeric levels in-app for now
-
-The comparison is purely local — services already store both the user's level and the
-sample's minimum and does the check today. There is no cross-service value in
-moving it into FGA yet. Let FGA own the other service's **roles and membership** (worth sharing)
-and leave the integer compare where it works. The condition above documents that
-it *can* be expressed in FGA if another service ever needs to honor access levels —
-it is not a task to rush.
-
-### Field-level minimum access: do NOT model in FGA
-
-Per-field permission objects would explode the tuple count for no benefit.
-Field masking is data-shaping that happens *after* authorization, once the
-service knows the user's numeric level — a plain in-app filter over the field
-list. FGA answers "can this user see this sample"; the service decides which
-fields to return. Knowing where *not* to use FGA matters as much as the model.
-
-## Groups / teams
-
-`group` exists so access can be granted to a whole team in one tuple
-(`project:P#member@group:lab-x#member`). Whether you need it on day one depends on
-whether there is an org/team concept above `project` that grants access broadly,
-or whether it is all per-project grants today (an open question — see doc 003).
-The type is cheap to keep in the model even if unused initially.
-
-## Conditions / ABAC headroom
-
-GX Core has no attribute rules yet, but the condition mechanism above is the hook
-for future ones: embargo/publication dates, consent/data-use codes, or
-public-vs-controlled tiers all become conditions gating a relation on
-request-time context. Add them when the requirements firm up; nothing in the
-current model blocks them.
-
-## What the apps Check
-
-| Service | Question | Call |
-|---|---|---|
-| GX Core | view an analysis output | `Check(user:U, can_view, analysis_output:X)` |
-| GX Core | edit a sample | `Check(user:U, can_edit, sample:X)` |
-| GX Core | list visible samples | `ListObjects(user:U, can_view, sample)` |
-| SMS | view a leveled sample | `Check(user:U, can_view_leveled, sample:X, context={required_level: N})` |
-| any | administer a project | `Check(user:U, can_administer, project:X)` |
-
-`ListObjects` is heavier than a point `Check` and is the main performance risk at
-scale — prototype it against realistic sample volumes (doc 003).
+Reach for these only when a real requirement demands them.

@@ -1,212 +1,156 @@
-# OpenFGA model tests. Run offline (no server) with:
-#   docker run --rm -v "$PWD/fga:/work:ro" openfga/cli model test --tests /work/model.tests.yaml
-# or `just fga-model-test`. See docs/002 for the model these assert.
-name: gx-auth authorization model
+# OpenFGA model tests for the RBAC + hierarchy model. Run offline with:
+#   just fga-model-test
+name: gx-auth RBAC + hierarchy model
 
 model_file: ./model.fga
 
-# ---------------------------------------------------------------------------
-# Fixture graph (applies to every test below):
-#
-#   project:root ──parent──▶ project:child          (root is top-level)
-#     anne  = admin(root)     -> inherits admin of child (downward)
-#     bob   = member(root)    -> inherits member of child
-#     erin  = viewer(root) + access_level_ok(root, user_level=5)
-#     frank = access_level_ok(root, user_level=5)   [no role]
-#     carol = viewer(child)   [direct, does NOT reach root]
-#     grace = member(group:lab-x); group:lab-x#member = viewer(child)
-#     dave  = nothing
-#
-#   sample:s1            -> project:child
-#   sample:leveled1      -> project:root   (used for SMS leveled checks)
-#   analysis_output:a1   -> project:root   (deep leaf, flattened to project)
-# ---------------------------------------------------------------------------
+# Fixture:
+#   project:1 (root)  <- project:2 (child)  <- project:3 (grandchild)
+#     project:1: anne=admin, bob=member, carol=viewer
+#     project:2: dave=viewer   (direct role on the child only)
+#   sample:s1 -> project:1 ; sample:s2 -> project:2 ; analysis_output:a1 -> project:1
 tuples:
-  - user: project:root
-    relation: parent
-    object: project:child
-
   - user: user:anne
     relation: admin
-    object: project:root
+    object: project:1
   - user: user:bob
     relation: member
-    object: project:root
-  - user: user:erin
-    relation: viewer
-    object: project:root
-  - user: user:erin
-    relation: access_level_ok
-    object: project:root
-    condition:
-      name: meets_access_level
-      context:
-        user_level: 5
-  - user: user:frank
-    relation: access_level_ok
-    object: project:root
-    condition:
-      name: meets_access_level
-      context:
-        user_level: 5
-
+    object: project:1
   - user: user:carol
     relation: viewer
-    object: project:child
-
-  - user: user:grace
-    relation: member
-    object: group:lab-x
-  - user: group:lab-x#member
+    object: project:1
+  - user: user:dave
     relation: viewer
-    object: project:child
+    object: project:2
 
-  - user: project:child
+  # project:2's parent is project:1 ; project:3's parent is project:2
+  - user: project:1
+    relation: parent
+    object: project:2
+  - user: project:2
+    relation: parent
+    object: project:3
+
+  - user: project:1
     relation: project
     object: sample:s1
-  - user: project:root
+  - user: project:2
     relation: project
-    object: sample:leveled1
-  - user: project:root
+    object: sample:s2
+  - user: project:1
     relation: project
     object: analysis_output:a1
 
 tests:
-  - name: admin-has-full-access-and-inherits-down-the-tree
+  - name: matrix-on-the-project-where-roles-are-assigned
     check:
       - user: user:anne
-        object: project:root
+        object: project:1
         assertions:
-          can_administer: true
-          can_edit: true
           can_view: true
-      - user: user:anne
-        object: project:child
+          can_create: true
+          can_edit: true
+          can_delete: true
+          can_administer: true
+      - user: user:bob
+        object: project:1
         assertions:
-          can_administer: true
           can_edit: true
+          can_delete: false
+          can_administer: false
+      - user: user:carol
+        object: project:1
+        assertions:
           can_view: true
+          can_edit: false
 
-  - name: member-can-edit-but-not-administer-and-inherits-down
+  - name: roles-inherit-DOWN-the-tree
     check:
-      - user: user:bob
-        object: project:root
+      # anne is admin of the root -> admin of child and grandchild
+      - user: user:anne
+        object: project:2
         assertions:
-          can_administer: false
           can_edit: true
-          can_view: true
-      - user: user:bob
-        object: project:child
+          can_delete: true
+          can_administer: true
+      - user: user:anne
+        object: project:3
         assertions:
-          can_administer: false
+          can_delete: true
+      # bob is member of the root -> can edit down the tree, never delete
+      - user: user:bob
+        object: project:3
+        assertions:
           can_edit: true
+          can_delete: false
+      # carol is viewer of the root -> can view down the tree, never edit
+      - user: user:carol
+        object: project:3
+        assertions:
           can_view: true
+          can_edit: false
 
   - name: inheritance-is-downward-only
     check:
-      # carol is a direct viewer of child; that must NOT grant access to root
-      - user: user:carol
-        object: project:child
+      # dave has a role only on the child; it must NOT reach the parent
+      - user: user:dave
+        object: project:2
         assertions:
           can_view: true
-          can_edit: false
-      - user: user:carol
-        object: project:root
-        assertions:
-          can_view: false
-
-  - name: unrelated-user-has-no-access
-    check:
       - user: user:dave
-        object: project:root
+        object: project:1
         assertions:
           can_view: false
       - user: user:dave
-        object: sample:s1
+        object: project:3
+        assertions:
+          can_view: true  # dave's role on project:2 DOES flow to its child project:3
+
+  - name: unrelated-user-denied
+    check:
+      - user: user:erin
+        object: project:1
         assertions:
           can_view: false
 
-  - name: leaf-resources-inherit-from-their-project
+  - name: leaf-resources-inherit-through-the-hierarchy
     check:
-      # sample:s1 is under child; anne (admin via root) and carol (viewer of child) see it
+      # sample:s2 is under the CHILD project:2; anne/carol have roles on the root
       - user: user:anne
-        object: sample:s1
+        object: sample:s2
         assertions:
           can_view: true
           can_edit: true
       - user: user:carol
-        object: sample:s1
+        object: sample:s2
         assertions:
           can_view: true
           can_edit: false
-      # analysis_output flattened directly to root; bob (member of root) can edit
-      - user: user:bob
-        object: analysis_output:a1
-        assertions:
-          can_view: true
-          can_edit: true
-
-  - name: group-membership-grants-access
-    check:
-      - user: user:grace
-        object: project:child
-        assertions:
-          can_view: true
-          can_edit: false
-      - user: user:grace
+      - user: user:dave
         object: sample:s1
         assertions:
-          can_view: true
+          can_view: false  # s1 is under the root, dave only has the child
 
-  - name: sms-access-level-gate-passes-when-level-is-sufficient
-    check:
-      # erin is viewer AND access_level_ok(5); required 3 and 5 pass, 7 fails
-      - user: user:erin
-        object: sample:leveled1
-        context:
-          required_level: 3
-        assertions:
-          can_view_leveled: true
-      - user: user:erin
-        object: sample:leveled1
-        context:
-          required_level: 5
-        assertions:
-          can_view_leveled: true
-      - user: user:erin
-        object: sample:leveled1
-        context:
-          required_level: 7
-        assertions:
-          can_view_leveled: false
-
-  - name: sms-access-level-requires-both-role-and-level
-    check:
-      # frank has the level but no viewing role -> denied
-      - user: user:frank
-        object: sample:leveled1
-        context:
-          required_level: 1
-        assertions:
-          can_view_leveled: false
-      # bob has a viewing role (member->viewer) but no access_level_ok -> denied
-      - user: user:bob
-        object: sample:leveled1
-        context:
-          required_level: 1
-        assertions:
-          can_view_leveled: false
-
-  - name: list-objects-returns-all-visible-leaves
+  - name: list-objects-spans-the-subtree
     list_objects:
-      # erin is viewer of root -> viewer of child (downward) -> sees both samples
-      - user: user:erin
+      # anne (admin of root) sees the whole project subtree
+      - user: user:anne
+        type: project
+        assertions:
+          can_view:
+            - project:1
+            - project:2
+            - project:3
+      # dave (child only) sees the child and its descendant, not the root
+      - user: user:dave
+        type: project
+        assertions:
+          can_view:
+            - project:2
+            - project:3
+      - user: user:anne
         type: sample
         assertions:
           can_view:
-            - sample:leveled1
             - sample:s1
-      - user: user:dave
-        type: sample
-        assertions:
-          can_view: []
+            - sample:s2
