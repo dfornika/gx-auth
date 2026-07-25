@@ -26,6 +26,12 @@ COPY . /src/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-editable
 
+# Collect static assets into STATIC_ROOT (whitenoise serves them in prod).
+# Dummy DB/secret so settings import cleanly at build time.
+RUN DATABASE_URL=sqlite://:memory: SECRET_KEY=build-only-key \
+    uv run -m manage collectstatic --noinput
+
 EXPOSE 8000
 
+# Dev default; production (Fargate) overrides this with gunicorn (see infrastructure/).
 CMD ["uv", "run", "-m", "manage", "runserver", "0.0.0.0:8000"]

@@ -75,9 +75,26 @@ AUTH_USER_MODEL = "accounts.User"
 
 # --- Database ---------------------------------------------------------------
 
-DATABASES = {
-    "default": env.dj_db_url("DATABASE_URL", default="postgres://postgres@db/gxauth"),
-}
+# Prefer a single DATABASE_URL (local/compose); otherwise build from discrete
+# vars so the password can be injected from a secret (deployed / Fargate).
+if env.str("DATABASE_URL", default=""):
+    DATABASES = {"default": env.dj_db_url("DATABASE_URL")}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "HOST": env.str("DB_HOST", default="db"),
+            "PORT": env.str("DB_PORT", default="5432"),
+            "NAME": env.str("DB_NAME", default="gxauth"),
+            "USER": env.str("DB_USER", default="postgres"),
+            "PASSWORD": env.str("DB_PASSWORD", default=""),
+            "OPTIONS": {"sslmode": env.str("DB_SSLMODE", default="prefer")},
+        }
+    }
+
+# Name of the OpenFGA database created alongside gx-auth's (see ensure_openfga_db).
+OPENFGA_DB_NAME = env.str("OPENFGA_DB_NAME", default="openfga")
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 AUTH_PASSWORD_VALIDATORS = [
