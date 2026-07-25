@@ -1,0 +1,16 @@
+{% extends "admin/change_list.html" %}
+{% comment %}
+Discoverability for the inspector pages. Scoped to the GrantAudit changelist by
+Django's template fallback chain (admin/<app>/<model>/change_list.html), so no
+other admin screen is affected.
+
+GrantAudit records grants made *through* the control plane; the inspector shows
+what is actually in the engine. They are not the same set.
+{% endcomment %}
+
+{% block object-tools-items %}
+  <li><a href="{% url 'fga_inspector:tuples' %}" class="viewlink">Live tuples</a></li>
+  <li><a href="{% url 'fga_inspector:expand' %}" class="viewlink">Expand</a></li>
+  <li><a href="{% url 'fga_inspector:tree' %}" class="viewlink">Project hierarchy</a></li>
+  {{ block.super }}
+{% endblock %}

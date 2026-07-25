@@ -110,6 +110,12 @@ _FGA_URL := "http://openfga:8080"
         tuple write --api-url {{ _FGA_URL }} --store-id "${FGA_STORE_ID}" \
         {{ user }} {{ relation }} {{ object }}
 
+# Read stored tuples, e.g. `just fga-tuple-read` or `just fga-tuple-read --object project:demo`
+# CLI counterpart to the admin inspector at /admin/fga/tuples/.
+@fga-tuple-read *ARGS:
+    docker run --rm --network {{ _FGA_NET }} openfga/cli \
+        tuple read --api-url {{ _FGA_URL }} --store-id "${FGA_STORE_ID}" {{ ARGS }}
+
 # Check a relationship, e.g. `just fga-check user:anne can_view project:root`
 @fga-check user relation object:
     docker run --rm --network {{ _FGA_NET }} openfga/cli \

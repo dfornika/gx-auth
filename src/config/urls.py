@@ -20,6 +20,10 @@ api.add_router("/auth", auth_router)
 api.add_router("/authz", authz_router)
 
 urlpatterns = [
+    # Must precede the admin: AdminSite.get_urls() ends in a catch-all that
+    # matches every unclaimed admin/* path, so anything mounted after it is
+    # unreachable. These are staff+superuser-gated read-only inspector pages.
+    path(f"{settings.ADMIN_URL.rstrip('/')}/fga/", include("authz.admin_urls")),
     path(settings.ADMIN_URL, admin.site.urls),
     path("api/", api.urls),
     path("health/", HealthCheckView.as_view(), name="health"),

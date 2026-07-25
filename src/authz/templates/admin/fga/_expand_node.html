@@ -1,0 +1,52 @@
+{% comment %}
+One node of an expand tree, included recursively. Expects `node`.
+
+A `computed` node carries the same label as the expansion beneath it, so it is
+rendered as a bare edge rather than repeating itself.
+{% endcomment %}
+<ul class="tree">
+  <li>
+    {% if node.kind == "users" %}
+      {% if node.users %}
+        {% for u in node.users %}
+          <a class="mono" href="{% url 'fga_inspector:tuples' %}?user={{ u|urlencode }}">{{ u }}</a>{% if not forloop.last %}, {% endif %}
+        {% endfor %}
+        <span class="tag">assigned directly</span>
+      {% else %}
+        <span class="muted">no direct assignment</span>
+      {% endif %}
+
+    {% elif node.kind == "tuple_to_userset" %}
+      <span class="muted">inherited via</span> <code>{{ node.via }}</code>
+      {% if not node.children %}<span class="muted">— no matching tuples</span>{% endif %}
+
+    {% elif node.kind == "computed" %}
+      <span class="muted">→</span>
+      <a class="mono" href="{% url 'fga_inspector:expand' %}?object={{ node.target_object|urlencode }}&relation={{ node.target_relation|urlencode }}">{{ node.target }}</a>
+
+    {% elif node.kind == "union" %}
+      <span class="mono">{{ node.label }}</span> <span class="tag">any of</span>
+    {% elif node.kind == "intersection" %}
+      <span class="mono">{{ node.label }}</span> <span class="tag">all of</span>
+    {% elif node.kind == "difference" %}
+      <span class="mono">{{ node.label }}</span> <span class="tag">except</span>
+
+    {% elif node.kind == "repeat" %}
+      <span class="mono">{{ node.label }}</span>
+      <span class="muted">— already expanded above</span>
+
+    {% elif node.kind == "truncated" %}
+      <span class="mono">{{ node.label }}</span>
+      <span class="muted">— depth limit reached,</span>
+      <a href="{% url 'fga_inspector:expand' %}?object={{ node.target_object|urlencode }}&relation={{ node.target_relation|urlencode }}">continue from here →</a>
+
+    {% else %}
+      <span class="mono">{{ node.label|default:"—" }}</span>
+      <span class="muted">nothing further</span>
+    {% endif %}
+
+    {% for child in node.children %}
+      {% include "admin/fga/_expand_node.html" with node=child %}
+    {% endfor %}
+  </li>
+</ul>
