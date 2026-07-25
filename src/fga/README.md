@@ -64,3 +64,31 @@ It covers the RBAC matrix (admin/member/viewer → can_view/create/edit/delete/
 administer) and leaf resources inheriting from their project. Extend it whenever
 you touch `model.fga` — it is the safety net for model changes (see docs/003
 "Failure modes"). `just fga-model-validate` just checks the DSL parses.
+
+## Inspecting the live store
+
+`model.fga` is what you *meant*; the store is what the engine actually answers
+with. The two drift — `just fga-model-write` creates a **new** model each time,
+and a pinned `FGA_MODEL_ID` in `.env` keeps using the old one. Leave
+`FGA_MODEL_ID` blank to track the latest.
+
+Read-only inspector pages live in the admin (superuser only):
+
+| page | shows |
+|---|---|
+| `/admin/fga/tuples/` | live tuples, filterable, paginated |
+| `/admin/fga/expand/` | why an `object#relation` resolves, down to the users |
+| `/admin/fga/tree/` | the `parent` hierarchy roles inherit down |
+
+The status strip on each page names the store, the model in force, and warns
+when a pinned model is no longer the newest.
+
+Two things worth knowing about the tuple browser:
+
+- **Computed permissions are never stored.** `can_view` and friends are derived
+  from roles, so filtering for them returns nothing — expand one instead.
+- **The engine's filters are narrow.** OpenFGA's Read needs an object type plus
+  either an object id or a user; it cannot filter by relation alone. For those
+  queries the page scans and filters in-process, and says so.
+
+`just fga-tuple-read` is the CLI equivalent, useful for cross-checking.

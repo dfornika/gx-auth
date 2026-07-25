@@ -1,0 +1,62 @@
+{% extends "admin/fga/base.html" %}
+
+{% block fga_content %}
+  <div class="panel">
+    <form method="get" class="filters">
+      {% for field in form %}
+        <div>
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {{ field.errors }}
+          {% if field.help_text %}<span class="help">{{ field.help_text }}</span>{% endif %}
+        </div>
+      {% endfor %}
+      <div>
+        <label>&nbsp;</label>
+        <button type="submit">Expand</button>
+      </div>
+    </form>
+    {% if known_relations %}
+      <p class="help" style="margin-top:.75rem">
+        Storable relations in the active model: {% for r in known_relations %}<code>{{ r }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+        Computed permissions (<code>can_view</code> and friends) can be expanded too — that is what this page is for.
+      </p>
+    {% endif %}
+  </div>
+
+  {% if result %}
+    <div class="panel">
+      <h2>Effective users</h2>
+      {% if effective_users_error %}
+        <p class="muted">ListUsers unavailable on this server — {{ effective_users_error }}</p>
+      {% elif effective_users %}
+        <p>
+          {% for u in effective_users %}
+            <a class="mono" href="{% url 'fga_inspector:tuples' %}?user={{ u|urlencode }}">{{ u }}</a>{% if not forloop.last %}, {% endif %}
+          {% endfor %}
+        </p>
+        <p class="muted">
+          The engine's own answer to “who holds this?”, asked independently of the
+          tree below. If the two disagree, one of them is wrong.
+        </p>
+      {% else %}
+        <p class="muted">Nobody holds <code>{{ expanded_relation }}</code> on <code>{{ expanded_object }}</code>.</p>
+      {% endif %}
+    </div>
+
+    <div class="panel">
+      <h2>Why — <span class="mono">{{ expanded_object }}#{{ expanded_relation }}</span></h2>
+      <div class="tree-root">
+        {% include "admin/fga/_expand_node.html" with node=result.root %}
+      </div>
+      <p class="muted" style="margin-top:.75rem">
+        {{ result.call_count }} engine call{{ result.call_count|pluralize }}.
+        {% if result.truncated %}
+          <strong>Truncated</strong> — raise the depth, or follow a “continue from here” link.
+        {% endif %}
+        Each level below a “inherited via” edge is a further call: OpenFGA's Expand
+        names the usersets to follow but does not follow them.
+      </p>
+    </div>
+  {% endif %}
+{% endblock %}

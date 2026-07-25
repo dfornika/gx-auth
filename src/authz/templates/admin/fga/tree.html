@@ -1,0 +1,24 @@
+{% extends "admin/fga/base.html" %}
+
+{% block fga_content %}
+  <div class="panel">
+    <h2>Project hierarchy</h2>
+    {% if tree.roots %}
+      {% for root in tree.roots %}
+        {% include "admin/fga/_project_node.html" with node=root %}
+      {% endfor %}
+      <p class="muted" style="margin-top:.75rem">
+        {{ tree.edge_count }} <code>parent</code> edge{{ tree.edge_count|pluralize }} found by
+        scanning {{ tree.scanned_count }} tuple{{ tree.scanned_count|pluralize }}.
+        {% if tree.scan_capped %}<strong>The scan hit its cap</strong> — projects may be missing.{% endif %}
+        A role granted on a project flows down to every project beneath it, so anyone
+        with a role here holds it on all descendants too.
+      </p>
+    {% else %}
+      <p class="muted">
+        No projects found. Load the demo fixture with <code>just fga-seed</code>, or
+        create one through a client service.
+      </p>
+    {% endif %}
+  </div>
+{% endblock %}

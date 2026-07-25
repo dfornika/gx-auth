@@ -126,6 +126,11 @@ FGA_API_URL = env.str("FGA_API_URL", default="http://openfga:8080")
 FGA_STORE_ID = env.str("FGA_STORE_ID", default="")
 FGA_MODEL_ID = env.str("FGA_MODEL_ID", default="")  # empty -> use store's latest model
 
+# Timeout for the read-only admin inspector's engine calls. The SDK default is
+# five minutes, which would pin a worker on an admin page load if OpenFGA hangs.
+# The decision hot path is unaffected.
+FGA_INSPECTOR_TIMEOUT_MS = env.int("FGA_INSPECTOR_TIMEOUT_MS", default=5000)
+
 # --- Cognito / Entra OIDC (set OIDC_ENABLED=true to activate) ----------------
 # See docs/004-identity-and-tokens.md. The token is identity-only; all
 # authorization lives in OpenFGA. Swapping Cognito for Entra is a config change.

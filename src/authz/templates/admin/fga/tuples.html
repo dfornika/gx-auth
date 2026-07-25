@@ -1,0 +1,95 @@
+{% extends "admin/fga/base.html" %}
+
+{% block fga_content %}
+  <div class="panel">
+    <form method="get" class="filters">
+      {% for field in form %}
+        <div>
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {{ field.errors }}
+          {% if field.help_text %}<span class="help">{{ field.help_text }}</span>{% endif %}
+        </div>
+      {% endfor %}
+      <div>
+        <label>&nbsp;</label>
+        <button type="submit">Filter</button>
+        <a href="{% url 'fga_inspector:tuples' %}" style="margin-left:.5rem">reset</a>
+      </div>
+
+      {# Suggestions only — the inputs stay free text so tuples written under an
+         earlier model (here: group:lab-x, access_level_ok) remain findable. #}
+      <datalist id="fga-object-types">
+        {% for t in form.object_types %}<option value="{{ t }}"></option>{% endfor %}
+      </datalist>
+      <datalist id="fga-relations">
+        {% for r in form.relations %}<option value="{{ r }}"></option>{% endfor %}
+      </datalist>
+    </form>
+    {% if form.non_field_errors %}{{ form.non_field_errors }}{% endif %}
+  </div>
+
+  {% if result %}
+    {% if result.scanned %}
+      <div class="note">
+        The engine cannot filter on this combination — it requires an object type
+        plus either an object id or a user. Scanned <strong>{{ result.scanned_count }}</strong>
+        tuple{{ result.scanned_count|pluralize }} and filtered them here, so these results
+        are complete but unpaginated.
+        {% if result.scan_capped %}
+          <strong>The scan hit its cap</strong>, so there may be more matches beyond
+          the tuples read.
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <table>
+      <thead>
+        <tr><th>user</th><th>relation</th><th>object</th><th>written</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for t in result.tuples %}
+          <tr>
+            <td class="mono"><a href="?user={{ t.user|urlencode }}">{{ t.user }}</a></td>
+            <td class="mono">{{ t.relation }}</td>
+            <td class="mono">
+              <a href="?object_type={{ t.object_type|urlencode }}&object_id={{ t.object_id|urlencode }}">{{ t.object }}</a>
+            </td>
+            <td class="muted">{{ t.timestamp|date:"Y-m-d H:i:s"|default:"—" }}</td>
+            <td>
+              <a href="{% url 'fga_inspector:expand' %}?object={{ t.object|urlencode }}&relation={{ t.relation|urlencode }}">expand</a>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="muted">
+            No tuples match.
+            {% if form.has_filters %}
+              Remember that permissions like <code>can_view</code> are computed and are
+              never stored as tuples — use <a href="{% url 'fga_inspector:expand' %}">Expand</a>
+              for those.
+            {% else %}
+              The store is empty; load the demo fixture with <code>just fga-seed</code>.
+            {% endif %}
+          </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <p class="muted" style="margin-top:.75rem">
+      {% if result.scanned %}
+        {{ result.tuples|length }} match{{ result.tuples|length|pluralize:"es" }}.
+      {% else %}
+        Page {{ page_number }} · {{ result.tuples|length }} row{{ result.tuples|length|pluralize }}.
+        {% if next_page_query %}
+          <a href="?{{ next_page_query }}">Next page →</a>
+        {% else %}
+          No further pages.
+        {% endif %}
+        {% if page_number > 1 %}
+          <a href="{% url 'fga_inspector:tuples' %}" style="margin-left:.5rem">← start over</a>
+        {% endif %}
+      {% endif %}
+      Rows appear in the engine's own order, which OpenFGA does not guarantee.
+    </p>
+  {% endif %}
+{% endblock %}

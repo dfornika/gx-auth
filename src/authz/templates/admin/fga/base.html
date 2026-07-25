@@ -1,0 +1,90 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Shared chrome for the read-only OpenFGA inspector.
+
+Extends admin/base_site.html, which resolves to django-unfold's copy because
+"unfold" precedes "django.contrib.admin" in INSTALLED_APPS — so these pages
+inherit whatever the admin already looks like.
+
+Styling is a scoped <style> block rather than Tailwind classes or a static file:
+whitenoise uses CompressedManifestStaticFilesStorage and collectstatic runs at
+image build, so a new asset that isn't rebuilt is a silent 500. Colours are
+neutral greys at low alpha, which read correctly in both light and dark themes.
+{% endcomment %}
+
+{% block content %}
+<div class="fga">
+<style>
+  .fga { font-size: .875rem; }
+  .fga h2 { font-size: 1rem; font-weight: 600; margin: 0 0 .75rem; }
+  .fga a { text-decoration: underline; }
+  .fga .mono, .fga code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .fga .muted { opacity: .65; }
+  .fga .panel { border: 1px solid rgba(128,128,128,.3); border-radius: .5rem;
+                padding: 1rem; margin-bottom: 1rem; }
+  .fga .note { border-left: 3px solid rgba(128,128,128,.5); padding: .5rem .75rem;
+               margin-bottom: 1rem; background: rgba(128,128,128,.08); }
+  .fga .warn { border-left-color: #d97706; background: rgba(217,119,6,.1); }
+  .fga .err  { border-left-color: #dc2626; background: rgba(220,38,38,.1); }
+  .fga .tabs { display: flex; gap: 1.25rem; margin-bottom: 1rem;
+               border-bottom: 1px solid rgba(128,128,128,.3); padding-bottom: .5rem; }
+  .fga .tabs a { text-decoration: none; opacity: .7; }
+  .fga .tabs a.on { font-weight: 600; opacity: 1; text-decoration: underline; }
+  .fga .strip { display: flex; flex-wrap: wrap; gap: 1.25rem; margin-bottom: 1rem;
+                font-size: .8rem; opacity: .8; }
+  .fga table { width: 100%; border-collapse: collapse; }
+  .fga th, .fga td { text-align: left; padding: .4rem .6rem;
+                     border-bottom: 1px solid rgba(128,128,128,.25); vertical-align: top; }
+  .fga th { font-weight: 600; opacity: .75; }
+  .fga form.filters { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
+  .fga form.filters label { display: block; font-weight: 600; margin-bottom: .2rem; }
+  .fga form.filters .help { display: block; max-width: 22rem; opacity: .6; font-size: .75rem; }
+  .fga form.filters ul.errorlist { color: #dc2626; margin: .2rem 0; padding-left: 1rem; }
+  .fga ul.tree { list-style: none; margin: 0; padding-left: 1rem;
+                 border-left: 1px solid rgba(128,128,128,.3); }
+  .fga ul.tree.root { border-left: 0; padding-left: 0; }
+  .fga ul.tree li { padding: .15rem 0; }
+  .fga .tag { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
+              opacity: .6; margin-left: .4rem; }
+</style>
+
+  <nav class="tabs">
+    <a href="{% url 'fga_inspector:tuples' %}" class="{% if tab == 'tuples' %}on{% endif %}">Live tuples</a>
+    <a href="{% url 'fga_inspector:expand' %}" class="{% if tab == 'expand' %}on{% endif %}">Expand</a>
+    <a href="{% url 'fga_inspector:tree' %}" class="{% if tab == 'tree' %}on{% endif %}">Project hierarchy</a>
+  </nav>
+
+  <div class="strip">
+    <span>engine <code>{{ status.api_url }}</code></span>
+    <span>store <code>{{ status.store_id|default:"— not set —" }}</code></span>
+    <span>
+      model <code>{{ status.model_id|default:"—" }}</code>
+      {% if status.pinned %}<span class="tag">pinned</span>{% else %}<span class="tag">latest</span>{% endif %}
+    </span>
+  </div>
+
+  {% if status.stale_pin %}
+    <div class="note warn">
+      <strong>The pinned model is not the newest in this store.</strong>
+      <code>FGA_MODEL_ID</code> is set to <code>{{ status.model_id }}</code>, but the
+      store's latest model is <code>{{ status.latest_model_id }}</code>. Checks are being
+      answered against the older one. Blank <code>FGA_MODEL_ID</code> to track the latest.
+    </div>
+  {% endif %}
+
+  {% if not status.configured %}
+    <div class="note warn">
+      <strong>No OpenFGA store is configured.</strong>
+      Create one with <code>just fga-store-create</code>, put the id in <code>.env</code> as
+      <code>FGA_STORE_ID</code>, then <code>just reload web</code> (a restart does not
+      reload the environment).
+    </div>
+  {% elif status.error %}
+    <div class="note err"><strong>Engine unavailable.</strong> {{ status.error }}</div>
+  {% elif error %}
+    <div class="note err">{{ error }}</div>
+  {% else %}
+    {% block fga_content %}{% endblock %}
+  {% endif %}
+</div>
+{% endblock %}

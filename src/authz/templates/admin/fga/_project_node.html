@@ -1,0 +1,10 @@
+{% comment %}One project and its descendants, included recursively. Expects `node`.{% endcomment %}
+<ul class="tree">
+  <li>
+    <a class="mono" href="{% url 'fga_inspector:tuples' %}?object_type=project&object_id={{ node.object_id|urlencode }}">{{ node.id }}</a>
+    <a class="tag" href="{% url 'fga_inspector:expand' %}?object={{ node.id|urlencode }}&relation=can_view">who can view?</a>
+    {% for child in node.children %}
+      {% include "admin/fga/_project_node.html" with node=child %}
+    {% endfor %}
+  </li>
+</ul>
