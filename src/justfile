@@ -63,6 +63,12 @@ build *ARGS:
 @test *ARGS:
     docker compose run --rm --no-deps utility uv run pytest {{ ARGS }}
 
+# Create a user from their IdP sub, ahead of first login. Prints the FGA subject.
+# Look up the sub in the Cognito console (or `aws cognito-idp admin-get-user`).
+# e.g. `just provision-user jane abc-123-sub jane@example.org`
+@provision-user username sub email='':
+    docker compose run --rm --no-deps -T utility uv run -m manage provision_user {{ username }} --sub {{ sub }} {{ if email != "" { "--email " + email } else { "" } }}
+
 # Mint an API key for a (service) user; prints the raw key.
 # `sub` is the subject claim from the IdP — service accounts are provisioned as
 # Cognito app clients / Entra app registrations, not invented locally (ADR 0003).
