@@ -3,7 +3,14 @@ name = "gx-auth-sdk"
 version = "0.1.0"
 description = "Consumer SDK for the gx-auth authorization plane (OpenFGA + gx-auth control plane)"
 readme = "README.md"
-requires-python = ">=3.13"
+# Deliberately lower than the gx-auth service itself (3.13): this is a
+# library, and pinning it to the service's runtime needlessly excludes
+# consumers. Nothing here needs it -- the dependencies allow far older
+# (openfga-sdk >=3.10, django-ninja >=3.7) and the source uses
+# `from __future__ import annotations` throughout, no PEP 695 generics and
+# no 3.13-only stdlib. 3.12 is what has been verified against a live store;
+# 3.10 looks fine on inspection but is untested.
+requires-python = ">=3.12"
 dependencies = [
     "openfga-sdk>=0.9",
     "httpx",
