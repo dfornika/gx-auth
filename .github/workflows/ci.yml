@@ -46,6 +46,16 @@ jobs:
       - run: uv sync --frozen --directory src
       - run: uv run --directory src pytest
 
+  sdk-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --extra dev --directory sdk
+      - run: uv run --directory sdk pytest
+
   fga-model:
     runs-on: ubuntu-latest
     steps:
