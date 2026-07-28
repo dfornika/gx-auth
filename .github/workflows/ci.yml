@@ -14,8 +14,8 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --frozen --no-install-project --directory src
-      - run: uv run --directory src ruff check src/ sdk/
-      - run: uv run --directory src ruff format --check src/ sdk/
+      - run: uv run --directory src ruff check . ../sdk/
+      - run: uv run --directory src ruff format --check . ../sdk/
 
   test:
     runs-on: ubuntu-latest
