@@ -44,9 +44,10 @@ Do not assume one token type. The platform needs:
 1. **Interactive user tokens** — OIDC login via Cognito/Entra. `sub` → `user:<sub>`.
 2. **Service-account / machine-to-machine tokens** — for services calling each
    other and for automation. Cognito app clients (`client_credentials`) and Entra
-   app registrations both cover this natively. Represent a service account as its
-   own subject in OpenFGA if it needs grants (`user:svc-gx-flow` or a dedicated
-   `service` type).
+   app registrations both cover this natively. A service account is an IdP
+   principal like any other: it is registered at the IdP, carries a real `sub`,
+   and is an ordinary `user:<sub>` subject — **not** a locally-minted id and not
+   a separate OpenFGA type. See [ADR 0003](./decisions/0003-idp-sub-is-the-only-subject.md).
 3. **Long-lived, user-scoped API keys** — issued by the platform for scripts/CLI
    use, always a subset of the owner's access. GX Core already has an `APIKey`
    model + `BearerTokenAuth`; `gx-auth` mirrors that pattern so keys can
@@ -63,6 +64,56 @@ Do not assume one token type. The platform needs:
   step for existing tuples if the subject id format changes. Keeping `sub`
   isolated behind `user:<sub>` in one place (gx-auth) keeps that blast radius
   small.
+
+## The subject contract
+
+The rule, in full: **a valid subject is `user:<sub>`, where `sub` is the claim
+the IdP issued. There is no other kind of subject, and no fallback.** A
+principal with no `sub` — a Django superuser, an admin created before any OIDC
+wiring — has no OpenFGA subject at all. `User.fga_subject` returns `None` for
+it, and callers must deny. ([ADR 0003](./decisions/0003-idp-sub-is-the-only-subject.md).)
+
+Why so strict: **the store is shared.** A locally-invented id is unique inside
+one database and meaningless outside it, so gx-auth's pk 3 and a consumer's pk 3
+would both be `user:3` — two unrelated people holding each other's grants. This
+is a sharper objection than "not portable" above, and it is why the old
+`f"user:{self.sub or self.pk}"` fallback was removed.
+
+### What a consumer should do
+
+Check for the missing subject and deny **explicitly**, so a data problem is
+distinguishable from a real denial:
+
+```python
+if user.is_superuser:
+    return True                  # break-glass: service-local policy, not OpenFGA
+if not user.sub:
+    logger.error("user %s has no sub, so no OpenFGA subject; denying", user.pk)
+    return False
+return authz.check(f"user:{user.sub}", "can_view", f"project:{pid}")
+```
+
+`gx-auth-sdk` will not do this for you silently: it **raises `ValueError`** on an
+obviously malformed id (`"user:"`, `"alice"`, embedded whitespace) rather than
+passing it to the engine. OpenFGA answers a malformed `Check` with
+`allowed: false`, which is indistinguishable from a legitimate denial — so
+without that check, a bad row surfaces as a permissions mystery for one user.
+
+### Break-glass is out of scope on purpose
+
+Superuser access is a **service-local** decision (the short-circuit above). It is
+deliberately invisible to OpenFGA and to gx-auth's `GrantAudit`: break-glass
+belongs to the service operating it, and representing it in the shared store
+would make it broader, not better audited.
+
+### Known gap: you cannot grant before first login
+
+`CognitoOIDCBackend` creates the local `User` row on first login, so until then
+there is no `sub` to key a tuple against. The `sub` exists at the IdP — Cognito
+assigns it at pool-user creation — but gx-auth has no way to fetch it. Closing
+this needs an IdP lookup on the write path (`AdminGetUser` / MS Graph), which is
+new surface: today the service only ever *receives* identity, it never queries
+for it. Tracked in [issue #4](https://github.com/dfornika/gx-auth/issues/4).
 
 ## What gx-auth exposes
 
