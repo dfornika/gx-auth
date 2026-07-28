@@ -5,9 +5,12 @@ from __future__ import annotations
 import httpx
 
 from .config import get_config
+from .ids import validate_object, validate_subject
 
 
 def _post(method: str, subject: str, relation: str, obj: str, reason: str) -> None:
+    validate_subject(subject, "grant subject")
+    validate_object(obj, "grant object")
     cfg = get_config()
     resp = httpx.request(
         method,

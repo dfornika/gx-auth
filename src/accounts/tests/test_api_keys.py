@@ -28,3 +28,15 @@ def test_revoked_key_does_not_verify(user):
 @pytest.mark.django_db
 def test_fga_subject_uses_sub(user):
     assert user.fga_subject == "user:cognito-sub-alice"
+
+
+@pytest.mark.django_db
+def test_fga_subject_is_none_without_a_sub(superuser):
+    """An account that never came from the IdP has no subject — not a local one.
+
+    The pk fallback this replaces was actively unsafe: the store is shared, so
+    `user:<pk>` collides with an unrelated consumer's row of the same pk.
+    """
+    assert superuser.sub is None
+    assert superuser.fga_subject is None
+    assert str(superuser.pk) not in str(superuser.fga_subject)

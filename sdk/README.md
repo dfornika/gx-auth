@@ -64,11 +64,23 @@ class MyAppConfig(AppConfig):
         )
 ```
 
+### Import ordering
+
+`import gx_auth_sdk` is safe anywhere — the core is framework-agnostic and pulls
+in nothing but `openfga-sdk` and `httpx`.
+
+`require` and `StubHeaderAuth` are different: they import django-ninja, which
+evaluates its pydantic settings model at import time and so needs Django
+settings to already be loaded. They are resolved lazily, on first attribute
+access, so reach for them **after `django.setup()`** — from a views/api module,
+`AppConfig.ready()`, or inside a function. Naming them at module scope in
+`settings.py` raises an `ImportError` that says so.
+
 ## Use
 
 ```python
 import gx_auth_sdk as authz
-from gx_auth_sdk import require, StubHeaderAuth
+from gx_auth_sdk import require, StubHeaderAuth  # in an app module, not settings.py
 
 # enforce (django-ninja):
 @router.post("/projects/{pid}/samples")
@@ -93,7 +105,35 @@ authz.revoke("user:anne", "viewer", "project:1")
 - `control_plane.py` — gx-auth HTTP client (framework-agnostic)
 - `ninja.py` — `require()` decorator (needs the `ninja` extra)
 - `identity.py` — `StubHeaderAuth` for dev; real OIDC JWT auth belongs here later
+- `ids.py` — shallow validation of `type:id` ids (see below)
 - `config.py` — env/explicit configuration
 
 It carries **no policy**: the authorization model and object-id conventions live
 in gx-auth and each service, not here.
+
+## Malformed ids raise, they do not deny
+
+Every call validates its ids and raises `ValueError` on one that is obviously
+malformed — a missing or empty half (`"user:"`, `"project:"`), a bare name with
+no type (`"alice"`), embedded whitespace.
+
+This is deliberate. OpenFGA answers a malformed Check with `allowed: false`,
+which is indistinguishable from a legitimate denial, so a data bug would surface
+as a permissions problem — for one user, at the point of use. The canonical case
+is an account with **no IdP `sub`**, whose subject renders as `"user:"`.
+
+Validation is shallow by design: wrongly rejecting a valid id is worse than
+passing an odd one through, so the engine stays the authority on its own grammar.
+Usersets (`group:lab-x#member`) and wildcards (`user:*`) are valid subjects but
+not valid objects.
+
+A caller that wants a denial rather than an exception should check for the
+condition itself — an account with no subject has no authorization, and that is a
+decision the service should make explicitly:
+
+```python
+if not user.sub:
+    logger.error("user %s has no sub, so no OpenFGA subject; denying", user.pk)
+    return False
+return authz.check(f"user:{user.sub}", "can_view", f"project:{pid}")
+```
