@@ -45,7 +45,6 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --directory src
       - run: uv run --directory src pytest
-        working-directory: src
 
   fga-model:
     runs-on: ubuntu-latest
