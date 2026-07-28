@@ -29,7 +29,7 @@ def _split(value: str, what: str, empty_id_hint: str = "") -> tuple[str, str]:
     """Split `type:id`, raising with the offending value quoted."""
     if not isinstance(value, str) or not value:
         raise ValueError(f"gx-auth-sdk: {what} must be a non-empty string, got {value!r}")
-    if value.strip() != value or any(c.isspace() for c in value):
+    if any(c.isspace() for c in value):
         raise ValueError(f"gx-auth-sdk: {what} must not contain whitespace, got {value!r}")
 
     type_, sep, id_ = value.partition(":")

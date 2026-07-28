@@ -52,8 +52,11 @@ _EXTRA_EXPORTS = {
 # `find_spec` locates django-ninja without executing it, so `__all__` can report
 # whether the extra is installed without triggering the import it guards.
 _HAVE_NINJA = find_spec("ninja") is not None
-if _HAVE_NINJA:
-    __all__ += list(_EXTRA_EXPORTS)
+
+# __all__ lists ONLY core exports. The ninja extras are discoverable via
+# __dir__ (which checks whether they can actually resolve) and via direct
+# attribute access, but they must not appear in __all__ because `import *`
+# iterates it eagerly and would crash before django.setup().
 
 
 def _settings_configured() -> bool:
@@ -62,28 +65,28 @@ def _settings_configured() -> bool:
         from django.conf import settings
     except ImportError:  # pragma: no cover - django-ninja depends on django
         return False
-    # A property on LazySettings; reading it does not trigger setup.
     return settings.configured
 
 
 def __getattr__(name: str):
     """Resolve the `ninja`-extra exports on first use (PEP 562).
 
-    Both failure modes get their own message, because the two are easy to
-    confuse and the underlying exceptions say nothing useful about either.
+    Raises `AttributeError` (not `ImportError`) so that `hasattr()` works and
+    `from gx_auth_sdk import *` stays safe before `django.setup()`. The
+    explanatory message is in the exception text either way.
     """
     module = _EXTRA_EXPORTS.get(name)
     if module is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
     if not _HAVE_NINJA:
-        raise ImportError(
+        raise AttributeError(
             f"gx_auth_sdk.{name} requires django-ninja, which is not installed. "
-            'Install the extra: pip install "gx-auth-sdk[ninja]" '
+            "Install the extra: pip install gx-auth-sdk[ninja] "
             "(or add gx-auth-sdk[ninja] to your dependencies)."
         )
     if not _settings_configured():
-        raise ImportError(
+        raise AttributeError(
             f"gx_auth_sdk.{name} imports django-ninja, which reads Django settings "
             "at import time — but settings are not configured yet. Access it after "
             "django.setup(): from AppConfig.ready(), inside a view, or at module "
@@ -91,9 +94,13 @@ def __getattr__(name: str):
         )
 
     value = getattr(import_module(module, __name__), name)
-    globals()[name] = value  # cache: __getattr__ is not consulted again
+    globals()[name] = value
     return value
 
 
 def __dir__() -> list[str]:
-    return sorted(__all__)
+    # __all__ is the core set; advertise the extras only when they can resolve.
+    names = list(__all__)
+    if _HAVE_NINJA and _settings_configured():
+        names += list(_EXTRA_EXPORTS)
+    return sorted(names)

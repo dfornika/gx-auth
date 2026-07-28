@@ -50,7 +50,6 @@ def test_fga_subject_is_none_without_a_sub(superuser):
     """
     assert superuser.sub is None
     assert superuser.fga_subject is None
-    assert str(superuser.pk) not in str(superuser.fga_subject)
 
 
 # --- create_api_key: every key's user must carry an IdP sub (ADR 0003) ------
@@ -85,6 +84,28 @@ def test_create_api_key_backfills_a_blank_sub(superuser):
     mint(superuser.username, sub="idp-sub-root")
     superuser.refresh_from_db()
     assert superuser.fga_subject == "user:idp-sub-root"
+
+
+@pytest.mark.django_db
+def test_create_api_key_backfill_rejects_a_sub_already_in_use(user, superuser):
+    """Same uniqueness check as the new-user branch, for the backfill path."""
+    with pytest.raises(CommandError, match="already belongs to user 'alice'"):
+        mint(superuser.username, sub=user.sub)
+    superuser.refresh_from_db()
+    assert superuser.sub is None
+
+
+@pytest.mark.django_db
+def test_create_api_key_backfill_preserves_existing_identity_provider(db, django_user_model):
+    """Don't overwrite identity_provider with the argparse default on backfill."""
+    u = django_user_model.objects.create_user(
+        username="entra-user", identity_provider="entra"
+    )
+    assert not u.sub
+    mint(u.username, sub="entra-sub-123")
+    u.refresh_from_db()
+    assert u.sub == "entra-sub-123"
+    assert u.identity_provider == "entra"
 
 
 @pytest.mark.django_db

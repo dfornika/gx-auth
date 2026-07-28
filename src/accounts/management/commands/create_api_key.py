@@ -2,6 +2,8 @@ from django.core.management.base import BaseCommand, CommandError
 
 from accounts.models import APIKey, User
 
+_DEFAULT_IDP = "cognito"
+
 
 class Command(BaseCommand):
     help = (
@@ -24,8 +26,8 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--identity-provider",
-            default="cognito",
-            help="Name of the IdP that issued --sub (default: cognito)",
+            default=_DEFAULT_IDP,
+            help=f"Name of the IdP that issued --sub (default: {_DEFAULT_IDP})",
         )
 
     def handle(self, *args, **opts):
@@ -71,9 +73,19 @@ class Command(BaseCommand):
                     "a key for it could not authorize anything. Pass --sub to backfill "
                     "the value from the IdP."
                 )
+            clash = User.objects.filter(sub=sub).first()
+            if clash is not None:
+                raise CommandError(
+                    f"sub {sub!r} already belongs to user {clash.username!r}. "
+                    "A subject identifies exactly one principal."
+                )
             user.sub = sub
-            user.identity_provider = opts["identity_provider"]
-            user.save(update_fields=["sub", "identity_provider"])
+            fields = ["sub"]
+            idp = opts["identity_provider"]
+            if idp != _DEFAULT_IDP or not user.identity_provider:
+                user.identity_provider = idp
+                fields.append("identity_provider")
+            user.save(update_fields=fields)
             self.stderr.write(f"Backfilled sub {sub!r} on existing user {username!r}.")
 
         elif sub and sub != user.sub:
