@@ -31,7 +31,7 @@ def test_prints_fga_subject():
 
 @pytest.mark.django_db
 def test_requires_sub():
-    with pytest.raises(SystemExit):
+    with pytest.raises(CommandError, match="--sub"):
         provision("jane")
 
 
