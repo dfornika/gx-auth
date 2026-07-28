@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --no-install-project --directory src
+      - run: uv run --directory src ruff check src/ sdk/
+      - run: uv run --directory src ruff format --check src/ sdk/
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: gxauth
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres@localhost:5432/gxauth
+      SECRET_KEY: ci-test-key
+      DJANGO_DEBUG: "true"
+      FGA_STORE_ID: 01TESTSTORE000000000000000000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --directory src
+      - run: uv run --directory src pytest
+        working-directory: src
+
+  fga-model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate model
+        run: >
+          docker run --rm -v "${{ github.workspace }}/src/fga:/work:ro"
+          openfga/cli model validate --file /work/model.fga
+      - name: Run model tests
+        run: >
+          docker run --rm -v "${{ github.workspace }}/src/fga:/work:ro"
+          openfga/cli model test --tests /work/model.tests.yaml
