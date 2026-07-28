@@ -18,9 +18,21 @@ class User(AbstractUser):
     identity_provider = models.CharField(max_length=64, blank=True, default="")
 
     @property
-    def fga_subject(self) -> str:
-        """The OpenFGA subject id for this user."""
-        return f"user:{self.sub or self.pk}"
+    def fga_subject(self) -> str | None:
+        """The OpenFGA subject id for this user, or None if it has none.
+
+        Only the IdP `sub` is a globally stable identity. The store is shared
+        across services, so a locally-minted id is not merely unportable — it
+        *collides*: this row's pk 3 and some consumer's pk 3 would both be
+        `user:3` and would grant each other's access. An account with no `sub`
+        therefore has no subject at all, and callers must deny.
+
+        Returning None rather than raising keeps the denial the caller's
+        decision (a superuser short-circuit is a legitimate answer), but it must
+        be an explicit one — never interpolate this into an id unchecked.
+        See docs/004-identity-and-tokens.md.
+        """
+        return f"user:{self.sub}" if self.sub else None
 
 
 class APIKey(models.Model):

@@ -6,7 +6,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
     dependencies = [
@@ -15,19 +14,37 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='GrantAudit',
+            name="GrantAudit",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('action', models.CharField(choices=[('grant', 'grant'), ('revoke', 'revoke')], max_length=8)),
-                ('subject', models.CharField(max_length=255)),
-                ('relation', models.CharField(max_length=64)),
-                ('object', models.CharField(max_length=255)),
-                ('reason', models.TextField(blank=True, default='')),
-                ('created_at', models.DateTimeField(auto_now_add=True, db_index=True)),
-                ('performed_by', models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='grant_audits', to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                (
+                    "action",
+                    models.CharField(
+                        choices=[("grant", "grant"), ("revoke", "revoke")], max_length=8
+                    ),
+                ),
+                ("subject", models.CharField(max_length=255)),
+                ("relation", models.CharField(max_length=64)),
+                ("object", models.CharField(max_length=255)),
+                ("reason", models.TextField(blank=True, default="")),
+                ("created_at", models.DateTimeField(auto_now_add=True, db_index=True)),
+                (
+                    "performed_by",
+                    models.ForeignKey(
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="grant_audits",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'ordering': ['-created_at'],
+                "ordering": ["-created_at"],
             },
         ),
     ]

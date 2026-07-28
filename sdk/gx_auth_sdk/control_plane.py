@@ -5,9 +5,12 @@ from __future__ import annotations
 import httpx
 
 from .config import get_config
+from .ids import validate_object, validate_subject
 
 
-def _post(method: str, subject: str, relation: str, obj: str, reason: str) -> None:
+def _post(method: str, subject: str, relation: str, obj: str, reason: str, *, verb: str) -> None:
+    validate_subject(subject, f"{verb} subject")
+    validate_object(obj, f"{verb} object")
     cfg = get_config()
     resp = httpx.request(
         method,
@@ -21,9 +24,9 @@ def _post(method: str, subject: str, relation: str, obj: str, reason: str) -> No
 
 def grant(subject: str, relation: str, obj: str, reason: str = "") -> None:
     """Grant `relation` on `obj` to `subject` (audited by gx-auth)."""
-    _post("POST", subject, relation, obj, reason)
+    _post("POST", subject, relation, obj, reason, verb="grant")
 
 
 def revoke(subject: str, relation: str, obj: str, reason: str = "") -> None:
     """Revoke `relation` on `obj` from `subject` (audited by gx-auth)."""
-    _post("DELETE", subject, relation, obj, reason)
+    _post("DELETE", subject, relation, obj, reason, verb="revoke")

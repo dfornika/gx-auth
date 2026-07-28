@@ -25,7 +25,8 @@ provider (AWS Cognito today, Azure Entra ID as a possible future pivot).
    This is the hardest part; read it before committing to the approach.
 4. [004 — Identity & tokens](./004-identity-and-tokens.md)
    Cognito/Entra OIDC, the "thin token" discipline that keeps authorization out
-   of the IdP, and how service accounts and API keys fit.
+   of the IdP, how service accounts and API keys fit, and the **subject
+   contract**: `user:<sub>` or nothing.
 
 ## Decisions
 
@@ -33,6 +34,7 @@ Architecture Decision Records live in [`decisions/`](./decisions/).
 
 - [0001 — Use OpenFGA (ReBAC) as the decision engine](./decisions/0001-use-openfga-rebac.md)
 - [0002 — Cloud-neutral identity; keep authorization out of the IdP](./decisions/0002-cloud-neutral-identity.md)
+- [0003 — Only the IdP `sub` is a valid authorization subject](./decisions/0003-idp-sub-is-the-only-subject.md)
 
 ## Status
 

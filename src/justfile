@@ -63,9 +63,12 @@ build *ARGS:
 @test *ARGS:
     docker compose run --rm --no-deps utility uv run pytest {{ ARGS }}
 
-# Mint an API key for a (service) user; prints the raw key. e.g. `just create-api-key svc-catalog`
-@create-api-key username name='default':
-    docker compose run --rm --no-deps -T utility uv run -m manage create_api_key {{ username }} --name {{ name }}
+# Mint an API key for a (service) user; prints the raw key.
+# `sub` is the subject claim from the IdP — service accounts are provisioned as
+# Cognito app clients / Entra app registrations, not invented locally (ADR 0003).
+# e.g. `just create-api-key svc-catalog 4f2a...-app-client-sub`
+@create-api-key username sub name='default':
+    docker compose run --rm --no-deps -T utility uv run -m manage create_api_key {{ username }} --sub {{ sub }} --name {{ name }}
 
 # Lint / format
 @lint *ARGS:
