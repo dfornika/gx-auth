@@ -39,7 +39,8 @@ def configure(
     _config = Config(
         fga_api_url=fga_api_url or os.environ.get("FGA_API_URL", "http://localhost:8080"),
         fga_store_id=store_id,
-        control_plane_url=control_plane_url or os.environ.get("GXAUTH_URL", "http://localhost:8000"),
+        control_plane_url=control_plane_url
+        or os.environ.get("GXAUTH_URL", "http://localhost:8000"),
         control_plane_api_key=control_plane_api_key or os.environ.get("GXAUTH_API_KEY", ""),
     )
     return _config

@@ -31,9 +31,7 @@ class CheckOut(Schema):
 
 @router.post("/check", response=CheckOut)
 def check(request, payload: CheckIn):
-    allowed = fga.check(
-        payload.user, payload.relation, payload.object, context=payload.context
-    )
+    allowed = fga.check(payload.user, payload.relation, payload.object, context=payload.context)
     return {"allowed": allowed}
 
 

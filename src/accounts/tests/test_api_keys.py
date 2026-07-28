@@ -98,9 +98,7 @@ def test_create_api_key_backfill_rejects_a_sub_already_in_use(user, superuser):
 @pytest.mark.django_db
 def test_create_api_key_backfill_preserves_existing_identity_provider(db, django_user_model):
     """Don't overwrite identity_provider with the argparse default on backfill."""
-    u = django_user_model.objects.create_user(
-        username="entra-user", identity_provider="entra"
-    )
+    u = django_user_model.objects.create_user(username="entra-user", identity_provider="entra")
     assert not u.sub
     mint(u.username, sub="entra-sub-123")
     u.refresh_from_db()

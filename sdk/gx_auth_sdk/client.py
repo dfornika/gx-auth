@@ -28,9 +28,7 @@ class Relationship:
 
 def _client() -> OpenFgaClient:
     cfg = get_config()
-    return OpenFgaClient(
-        ClientConfiguration(api_url=cfg.fga_api_url, store_id=cfg.fga_store_id)
-    )
+    return OpenFgaClient(ClientConfiguration(api_url=cfg.fga_api_url, store_id=cfg.fga_store_id))
 
 
 def check(user: str, relation: str, obj: str, context: dict | None = None) -> bool:
@@ -57,9 +55,7 @@ def list_objects(user: str, relation: str, type_: str) -> list[str]:
     validate_subject(user, "list_objects() user")
     validate_type(type_, "list_objects() type")
     with _client() as fga:
-        resp = fga.list_objects(
-            ClientListObjectsRequest(user=user, relation=relation, type=type_)
-        )
+        resp = fga.list_objects(ClientListObjectsRequest(user=user, relation=relation, type=type_))
     return list(resp.objects)
 
 
