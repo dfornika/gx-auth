@@ -8,9 +8,11 @@
 """
 
 from ninja import Router, Schema
+from pydantic import field_validator
 
 from .models import GrantAudit
 from .services import fga
+from .validators import validate_object, validate_relation, validate_subject, validate_type_name
 
 router = Router(tags=["authz"])
 
@@ -23,6 +25,21 @@ class CheckIn(Schema):
     relation: str  # e.g. "can_view"
     object: str  # e.g. "sample:42"
     context: dict | None = None  # condition params, e.g. {"required_level": 3}
+
+    @field_validator("user")
+    @classmethod
+    def _user_is_valid_subject(cls, v: str) -> str:
+        return validate_subject(v)
+
+    @field_validator("relation")
+    @classmethod
+    def _relation_is_valid(cls, v: str) -> str:
+        return validate_relation(v)
+
+    @field_validator("object")
+    @classmethod
+    def _object_is_valid(cls, v: str) -> str:
+        return validate_object(v)
 
 
 class CheckOut(Schema):
@@ -43,6 +60,21 @@ class ListObjectsIn(Schema):
     relation: str
     type: str  # object type, e.g. "sample"
     context: dict | None = None
+
+    @field_validator("user")
+    @classmethod
+    def _user_is_valid_subject(cls, v: str) -> str:
+        return validate_subject(v)
+
+    @field_validator("relation")
+    @classmethod
+    def _relation_is_valid(cls, v: str) -> str:
+        return validate_relation(v)
+
+    @field_validator("type")
+    @classmethod
+    def _type_is_valid(cls, v: str) -> str:
+        return validate_type_name(v)
 
 
 class ListObjectsOut(Schema):
@@ -65,6 +97,21 @@ class GrantIn(Schema):
     relation: str  # role, e.g. "member"
     object: str  # "project:42"
     reason: str = ""
+
+    @field_validator("subject")
+    @classmethod
+    def _subject_is_valid(cls, v: str) -> str:
+        return validate_subject(v, "subject")
+
+    @field_validator("relation")
+    @classmethod
+    def _relation_is_valid(cls, v: str) -> str:
+        return validate_relation(v)
+
+    @field_validator("object")
+    @classmethod
+    def _object_is_valid(cls, v: str) -> str:
+        return validate_object(v)
 
 
 @router.post("/grants", response={201: None})
