@@ -1,5 +1,16 @@
 """Shared fixtures for SDK tests."""
 
+import django
+from django.conf import settings
+
+if not settings.configured:
+    settings.configure(
+        SECRET_KEY="test-only",
+        ROOT_URLCONF="tests.test_identity",
+        INSTALLED_APPS=["django.contrib.auth", "django.contrib.contenttypes"],
+    )
+    django.setup()
+
 from unittest.mock import MagicMock
 
 import gx_auth_sdk.config as config_mod
