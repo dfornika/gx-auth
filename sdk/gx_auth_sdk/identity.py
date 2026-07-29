@@ -65,9 +65,7 @@ class CognitoJWTAuth(HttpBearer):
                 "or pass them to the constructor."
             )
 
-        self._issuer = (
-            f"https://cognito-idp.{self._region}.amazonaws.com/{self._user_pool_id}"
-        )
+        self._issuer = f"https://cognito-idp.{self._region}.amazonaws.com/{self._user_pool_id}"
         self._jwks_url = f"{self._issuer}/.well-known/jwks.json"
         self._jwks_client: PyJWKClient | None = None
         self._jwks_lock = threading.Lock()
@@ -77,9 +75,7 @@ class CognitoJWTAuth(HttpBearer):
         if self._jwks_client is None:
             with self._jwks_lock:
                 if self._jwks_client is None:
-                    self._jwks_client = PyJWKClient(
-                        self._jwks_url, cache_keys=True, lifespan=3600
-                    )
+                    self._jwks_client = PyJWKClient(self._jwks_url, cache_keys=True, lifespan=3600)
         return self._jwks_client
 
     def authenticate(self, request: Any, token: str) -> str | None:

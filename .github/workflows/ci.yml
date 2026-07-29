@@ -53,7 +53,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync --frozen --extra dev --directory sdk
+      - run: uv sync --frozen --extra dev --extra ninja --directory sdk
       - run: uv run --directory sdk pytest
 
   fga-model:

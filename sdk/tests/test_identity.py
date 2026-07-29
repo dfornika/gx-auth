@@ -57,9 +57,7 @@ def _make_token(claims: dict | None = None, **overrides) -> str:
     if claims:
         payload.update(claims)
     payload.update(overrides)
-    return pyjwt.encode(
-        payload, _private_pem, algorithm="RS256", headers={"kid": "test-kid"}
-    )
+    return pyjwt.encode(payload, _private_pem, algorithm="RS256", headers={"kid": "test-kid"})
 
 
 @pytest.fixture
@@ -117,8 +115,8 @@ class TestCognitoJWTAuth:
         assert result is None
 
     def test_rejects_garbage_token(self, auth, request_obj):
-        auth._jwks_client.get_signing_key_from_jwt.side_effect = (
-            pyjwt.exceptions.DecodeError("not a jwt")
+        auth._jwks_client.get_signing_key_from_jwt.side_effect = pyjwt.exceptions.DecodeError(
+            "not a jwt"
         )
         result = auth.authenticate(request_obj, "not.a.jwt")
         assert result is None

@@ -1,15 +1,18 @@
 """Shared fixtures for SDK tests."""
 
-import django
-from django.conf import settings
+try:
+    import django
+    from django.conf import settings
 
-if not settings.configured:
-    settings.configure(
-        SECRET_KEY="test-only",
-        ROOT_URLCONF="tests.test_identity",
-        INSTALLED_APPS=["django.contrib.auth", "django.contrib.contenttypes"],
-    )
-    django.setup()
+    if not settings.configured:
+        settings.configure(
+            SECRET_KEY="test-only",
+            ROOT_URLCONF="tests.test_identity",
+            INSTALLED_APPS=["django.contrib.auth", "django.contrib.contenttypes"],
+        )
+        django.setup()
+except ImportError:
+    pass
 
 from unittest.mock import MagicMock
 
