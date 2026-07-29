@@ -5,7 +5,7 @@ Core (no framework deps):
     grant, revoke, configure
 
 With the `ninja` extra:
-    require, StubHeaderAuth
+    require, CognitoJWTAuth, StubHeaderAuth
 
 The framework glue is imported lazily (PEP 562), on first *attribute access*
 rather than at `import gx_auth_sdk` time. A core SDK that talks to OpenFGA over
@@ -46,6 +46,7 @@ __all__ = [
 #: Lazily-loaded exports from the `ninja` extra -> the submodule defining each.
 _EXTRA_EXPORTS = {
     "require": ".ninja",
+    "CognitoJWTAuth": ".identity",
     "StubHeaderAuth": ".identity",
 }
 

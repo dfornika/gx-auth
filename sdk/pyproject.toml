@@ -17,8 +17,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Framework glue (require() decorator, stub identity). Install as gx-auth-sdk[ninja].
-ninja = ["django-ninja>=1.6"]
+# Framework glue (require() decorator, JWT auth, stub identity). Install as gx-auth-sdk[ninja].
+ninja = ["django-ninja>=1.6", "PyJWT[crypto]>=2.8"]
 dev = ["pytest>=8"]
 
 [build-system]
