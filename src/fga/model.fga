@@ -8,8 +8,26 @@ model
 
 type user
 
+# The platform itself: one object (e.g. `platform:gx`) holding operator-level
+# roles for the gx-auth control plane. See docs/002 and ADR 0004.
+type platform
+  relations
+    # Operators. May manage role grants on ANY project through the control
+    # plane — including a brand-new project that has no admin yet.
+    define admin: [user]
+    # Services trusted to name the end user they act for (`on_behalf_of`) when
+    # calling the control plane. Grants no access to any project by itself.
+    define delegate: [user]
+
 type project
   relations
+    # The platform a project belongs to. The control plane supplies this edge
+    # as a contextual tuple when it authorizes a grant, so platform admins can
+    # manage grants on any project without it being stored. Nothing stores it
+    # today, so platform admins hold no *data* access by default: to see a
+    # project's contents they must grant themselves a role, which is audited.
+    define platform: [platform]
+
     # parent project (top-level projects have no parent tuple).
     # Application enforces the max nesting depth and forbids cycles at write time;
     # it stays well under OpenFGA's resolve-node-limit (default 25).
@@ -17,7 +35,7 @@ type project
 
     # --- role assignments: the only thing you manage ---
     # Each role inherits itself from the parent project (downward inheritance).
-    define admin: [user] or admin from parent
+    define admin: [user] or admin from parent or admin from platform
     define member: [user] or member from parent
     define viewer: [user] or viewer from parent
 

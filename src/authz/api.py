@@ -5,11 +5,18 @@
   directly (see docs/001).
 - `grants`: the audited write path — domain grant/revoke that translates into
   tuple writes and records a GrantAudit row (see docs/003).
+
+Every endpoint is authorized against gx-auth's own model (`policy`, ADR 0004):
+a caller queries only its own permissions unless it is a platform delegate,
+and manages grants on a project only if the actor holds `can_administer` there.
 """
 
+from django.db import transaction
 from ninja import Router, Schema
-from pydantic import field_validator
+from ninja.errors import HttpError
+from pydantic import field_validator, model_validator
 
+from . import policy
 from .models import GrantAudit
 from .services import fga
 from .validators import validate_object, validate_relation, validate_subject, validate_type_name
@@ -46,8 +53,16 @@ class CheckOut(Schema):
     allowed: bool
 
 
+def _ensure_can_query(request, subject: str) -> None:
+    try:
+        policy.ensure_can_query(request.user, subject)
+    except policy.Forbidden as exc:
+        raise HttpError(403, str(exc)) from exc
+
+
 @router.post("/check", response=CheckOut)
 def check(request, payload: CheckIn):
+    _ensure_can_query(request, payload.user)
     allowed = fga.check(payload.user, payload.relation, payload.object, context=payload.context)
     return {"allowed": allowed}
 
@@ -83,6 +98,7 @@ class ListObjectsOut(Schema):
 
 @router.post("/list-objects", response=ListObjectsOut)
 def list_objects(request, payload: ListObjectsIn):
+    _ensure_can_query(request, payload.user)
     objects = fga.list_objects(
         payload.user, payload.relation, payload.type, context=payload.context
     )
@@ -97,6 +113,9 @@ class GrantIn(Schema):
     relation: str  # role, e.g. "member"
     object: str  # "project:42"
     reason: str = ""
+    # The end user a platform delegate (e.g. a consuming service) acts for. The
+    # grant is authorized against this user's permissions, not the caller's.
+    on_behalf_of: str | None = None
 
     @field_validator("subject")
     @classmethod
@@ -113,32 +132,76 @@ class GrantIn(Schema):
     def _object_is_valid(cls, v: str) -> str:
         return validate_object(v)
 
+    @field_validator("on_behalf_of")
+    @classmethod
+    def _on_behalf_of_is_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        validate_subject(v, "on_behalf_of")
+        # Only a person acts; a userset ("group:x#member") or wildcard cannot.
+        if not v.startswith("user:") or "#" in v or v == "user:*":
+            raise ValueError(f"on_behalf_of must be a single user, 'user:<sub>', got {v!r}")
+        return v
+
+    @model_validator(mode="after")
+    def _relation_is_grantable(self):
+        if not policy.is_grantable(self.relation, self.object):
+            raise ValueError(
+                f"relation {self.relation!r} on {self.object!r} cannot be granted through "
+                "this API. Grantable: "
+                + "; ".join(
+                    f"{t}: {', '.join(sorted(rels))}"
+                    for t, rels in sorted(policy.GRANTABLE_RELATIONS.items())
+                )
+            )
+        return self
+
+
+def _authorize_grant(request, payload: GrantIn) -> policy.Actor:
+    try:
+        actor = policy.resolve_actor(request.user, payload.on_behalf_of)
+    except policy.Forbidden as exc:
+        raise HttpError(403, str(exc)) from exc
+    if not policy.can_manage_grants(actor, payload.object):
+        raise HttpError(
+            403, f"{actor.subject} may not manage roles on {payload.object}: needs can_administer."
+        )
+    return actor
+
+
+def _apply(request, payload: GrantIn, action: GrantAudit.Action) -> None:
+    """Authorize, then audit and write as one unit.
+
+    The audit row is created first, inside the transaction, so a failed engine
+    write rolls it back. The window left is an engine write that succeeds
+    followed by a failed commit — rare, and the reconciliation job (docs/003)
+    is what closes it.
+    """
+    actor = _authorize_grant(request, payload)
+    rel = fga.Relationship(user=payload.subject, relation=payload.relation, object=payload.object)
+    with transaction.atomic():
+        GrantAudit.objects.create(
+            action=action,
+            subject=payload.subject,
+            relation=payload.relation,
+            object=payload.object,
+            performed_by=request.user,
+            on_behalf_of=actor.subject if actor.delegate else "",
+            reason=payload.reason,
+        )
+        if action == GrantAudit.Action.GRANT:
+            fga.write_tuple(rel)
+        else:
+            fga.delete_tuple(rel)
+
 
 @router.post("/grants", response={201: None})
 def create_grant(request, payload: GrantIn):
-    rel = fga.Relationship(user=payload.subject, relation=payload.relation, object=payload.object)
-    fga.write_tuple(rel)
-    GrantAudit.objects.create(
-        action=GrantAudit.Action.GRANT,
-        subject=payload.subject,
-        relation=payload.relation,
-        object=payload.object,
-        performed_by=request.user,
-        reason=payload.reason,
-    )
+    _apply(request, payload, GrantAudit.Action.GRANT)
     return 201, None
 
 
 @router.delete("/grants", response={204: None})
 def revoke_grant(request, payload: GrantIn):
-    rel = fga.Relationship(user=payload.subject, relation=payload.relation, object=payload.object)
-    fga.delete_tuple(rel)
-    GrantAudit.objects.create(
-        action=GrantAudit.Action.REVOKE,
-        subject=payload.subject,
-        relation=payload.relation,
-        object=payload.object,
-        performed_by=request.user,
-        reason=payload.reason,
-    )
+    _apply(request, payload, GrantAudit.Action.REVOKE)
     return 204, None

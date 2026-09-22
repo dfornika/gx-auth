@@ -9,6 +9,9 @@ model_file: ./model.fga
 #     project:1: anne=admin, bob=member, carol=viewer
 #     project:2: dave=viewer   (direct role on the child only)
 #   sample:s1 -> project:1 ; sample:s2 -> project:2 ; analysis_output:a1 -> project:1
+#   platform:gx: olga=admin, svc-sds=delegate
+#     project:4 is attached to platform:gx by a STORED edge (only as a model
+#     test; the control plane supplies this edge contextually instead).
 tuples:
   - user: user:anne
     relation: admin
@@ -40,6 +43,16 @@ tuples:
   - user: project:1
     relation: project
     object: analysis_output:a1
+
+  - user: user:olga
+    relation: admin
+    object: platform:gx
+  - user: user:svc-sds
+    relation: delegate
+    object: platform:gx
+  - user: platform:gx
+    relation: platform
+    object: project:4
 
 tests:
   - name: matrix-on-the-project-where-roles-are-assigned
@@ -154,3 +167,57 @@ tests:
           can_view:
             - sample:s1
             - sample:s2
+
+  - name: platform-admin-reaches-projects-only-through-a-platform-edge
+    check:
+      # project:4 carries a platform edge -> olga is admin there
+      - user: user:olga
+        object: project:4
+        assertions:
+          admin: true
+          can_administer: true
+          can_view: true
+      # project:1 has no platform edge -> olga holds nothing on it. This is
+      # the default for real projects: platform admin is a control-plane role.
+      - user: user:olga
+        object: project:1
+        assertions:
+          admin: false
+          can_administer: false
+          can_view: false
+
+  # The control plane supplies the platform edge contextually when it
+  # authorizes a grant; these per-test tuples stand in for that.
+  - name: contextual-platform-edge-lets-platform-admin-manage-any-project
+    tuples:
+      - user: platform:gx
+        relation: platform
+        object: project:1
+    check:
+      - user: user:olga
+        object: project:1
+        assertions:
+          can_administer: true
+      # and it flows down the tree like any admin role
+      - user: user:olga
+        object: project:3
+        assertions:
+          can_administer: true
+      # a delegate is not an admin, edge or no edge
+      - user: user:svc-sds
+        object: project:1
+        assertions:
+          can_administer: false
+
+  - name: delegate-grants-no-project-access
+    check:
+      - user: user:svc-sds
+        object: platform:gx
+        assertions:
+          delegate: true
+          admin: false
+      - user: user:svc-sds
+        object: project:4
+        assertions:
+          can_view: false
+          can_administer: false

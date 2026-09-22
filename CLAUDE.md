@@ -33,4 +33,5 @@ model), `docs/003` (integration & the hard tuple-sync problem), `docs/004`
 - `authz/services/fga.py` — the single OpenFGA integration point.
 - `src/fga/model.fga` — the authorization model (explained in `docs/002`).
 - `authz/api.py` — check / list-objects / audited grants.
+- `authz/policy.py` — who may call the control plane (ADR 0004); asks the engine, decides nothing itself.
 - `accounts/` — User (`sub`), API keys, OIDC backend.

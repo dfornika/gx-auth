@@ -6,15 +6,24 @@ from .models import GrantAudit
 
 @admin.register(GrantAudit)
 class GrantAuditAdmin(ModelAdmin):
-    list_display = ("created_at", "action", "subject", "relation", "object", "performed_by")
+    list_display = (
+        "created_at",
+        "action",
+        "subject",
+        "relation",
+        "object",
+        "performed_by",
+        "on_behalf_of",
+    )
     list_filter = ("action", "relation")
-    search_fields = ("subject", "object", "relation")
+    search_fields = ("subject", "object", "relation", "on_behalf_of")
     readonly_fields = (
         "action",
         "subject",
         "relation",
         "object",
         "performed_by",
+        "on_behalf_of",
         "reason",
         "created_at",
     )

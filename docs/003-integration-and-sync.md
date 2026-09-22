@@ -96,7 +96,9 @@ Decide per-flow; do not globally force strong consistency (it costs latency).
   pointer): owned by the service that owns the resource, written via its chosen
   write path. gx-auth provides the endpoint/library; the service triggers it.
 - **Grant tuples** (U is an editor of project P; team T is a viewer of P): owned
-  by gx-auth's domain grant API, always audited.
+  by gx-auth's domain grant API, always audited, and authorized against the
+  actor's `can_administer` on P (ADR 0004). A service granting for a user passes
+  `on_behalf_of`.
 - **The authorization model** (the `.fga` schema): owned by gx-auth exclusively,
   versioned, and rolled out via the OpenFGA CLI (see `src/fga/README.md`).
 

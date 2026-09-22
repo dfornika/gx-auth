@@ -35,6 +35,7 @@ Architecture Decision Records live in [`decisions/`](./decisions/).
 - [0001 — Use OpenFGA (ReBAC) as the decision engine](./decisions/0001-use-openfga-rebac.md)
 - [0002 — Cloud-neutral identity; keep authorization out of the IdP](./decisions/0002-cloud-neutral-identity.md)
 - [0003 — Only the IdP `sub` is a valid authorization subject](./decisions/0003-idp-sub-is-the-only-subject.md)
+- [0004 — The control plane authorizes its own API](./decisions/0004-control-plane-authorizes-itself.md)
 
 ## Status
 

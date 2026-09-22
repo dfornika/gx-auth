@@ -25,6 +25,10 @@ class GrantAudit(models.Model):
         null=True,
         related_name="grant_audits",
     )
+    # Set when a platform delegate (a consuming service, recorded as
+    # `performed_by`) acted for an end user: the subject whose authority the
+    # grant was checked against. Blank when the caller acted for itself.
+    on_behalf_of = models.CharField(max_length=255, blank=True, default="")
     reason = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 

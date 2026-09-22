@@ -58,6 +58,31 @@ Two write-time rules the **application** enforces (not OpenFGA):
   so no engine tuning is needed.
 - **No cycles** — never set a project's parent to one of its own descendants.
 
+## Who may manage roles: the `platform` type
+
+Assigning a role through gx-auth's grants API is itself authorized: the actor
+needs `can_administer` on the project. A small `platform` type answers the two
+questions that rule leaves open (see [ADR 0004](./decisions/0004-control-plane-authorizes-itself.md)):
+
+```
+type platform
+  relations
+    define admin: [user]      # may manage grants on ANY project (bootstrap)
+    define delegate: [user]   # service trusted to act on behalf of end users
+
+type project
+  relations
+    define platform: [platform]
+    define admin: [user] or admin from parent or admin from platform
+    ...
+```
+
+The `project#platform` edge is **never stored**. The control plane supplies it
+as a contextual tuple when it authorizes a grant, so a platform admin can fix
+grants anywhere but holds no data access on the hot path. Platform roles are
+written with `just manage grant_platform_role admin|delegate <sub>`, never over
+HTTP.
+
 ## The conceptual cost (go in eyes-open)
 
 With hierarchy, **permissions are no longer local to a single project.** "Who can
