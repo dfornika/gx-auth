@@ -1,6 +1,6 @@
 [project]
 name = "gx-auth-sdk"
-version = "0.1.0"
+version = "0.2.0"
 description = "Consumer SDK for the gx-auth authorization plane (OpenFGA + gx-auth control plane)"
 readme = "README.md"
 # Deliberately lower than the gx-auth service itself (3.13): this is a

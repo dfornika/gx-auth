@@ -45,6 +45,21 @@ class TestGrant:
             grant("user:alice", "member", "project:")
         mock_httpx.assert_not_called()
 
+    def test_omits_on_behalf_of_unless_given(self, mock_httpx):
+        grant("user:alice", "member", "project:1")
+        _, kwargs = mock_httpx.call_args
+        assert "on_behalf_of" not in kwargs["json"]
+
+    def test_sends_on_behalf_of(self, mock_httpx):
+        grant("user:alice", "member", "project:1", on_behalf_of="user:carol")
+        _, kwargs = mock_httpx.call_args
+        assert kwargs["json"]["on_behalf_of"] == "user:carol"
+
+    def test_rejects_malformed_on_behalf_of(self, mock_httpx):
+        with pytest.raises(ValueError, match="on_behalf_of"):
+            grant("user:alice", "member", "project:1", on_behalf_of="user:")
+        mock_httpx.assert_not_called()
+
     def test_raises_on_http_error(self, mock_httpx):
         mock_httpx.return_value = httpx.Response(403, request=_FAKE_REQUEST)
         with pytest.raises(httpx.HTTPStatusError):
@@ -63,3 +78,8 @@ class TestRevoke:
         with pytest.raises(ValueError):
             revoke("user:", "member", "project:1")
         mock_httpx.assert_not_called()
+
+    def test_sends_on_behalf_of(self, mock_httpx):
+        revoke("user:alice", "member", "project:1", on_behalf_of="user:carol")
+        _, kwargs = mock_httpx.call_args
+        assert kwargs["json"]["on_behalf_of"] == "user:carol"
