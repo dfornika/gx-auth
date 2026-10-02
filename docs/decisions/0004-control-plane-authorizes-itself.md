@@ -29,7 +29,10 @@ facts shape the fix:
 1. **Grants are authorized by the engine.** Granting or revoking a role on
    `project:X` requires the **actor** to hold `can_administer` on `project:X`,
    answered by OpenFGA like any other decision. Inherited admin (from a parent
-   project) counts.
+   project) counts. Every policy check (`can_administer`, `delegate`) requests
+   **higher consistency**, so a role revoked a moment ago cannot still
+   authorize a control-plane action. The latency cost is confined to the
+   control plane; the hot path keeps the engine's default.
 2. **Only role relations are grantable over HTTP.** `policy.GRANTABLE_RELATIONS`
    (today `project`: `admin`, `member`, `viewer`) is an explicit allowlist.
    Structural edges (`parent`, `project`, `platform`) belong to resource sync

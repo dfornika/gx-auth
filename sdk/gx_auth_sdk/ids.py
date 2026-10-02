@@ -16,7 +16,7 @@ See gx-auth issue #3.
 
 from __future__ import annotations
 
-__all__ = ["validate_subject", "validate_object", "validate_type"]
+__all__ = ["validate_subject", "validate_user", "validate_object", "validate_type"]
 
 #: The overwhelmingly common cause of an empty subject id, so name it directly.
 _NO_SUB_HINT = (
@@ -62,6 +62,18 @@ def validate_subject(value: str, what: str = "subject") -> str:
         )
     if sep and not id_part:
         raise ValueError(f"gx-auth-sdk: {what} has an empty id, got {value!r}")
+    return value
+
+
+def validate_user(value: str, what: str = "user") -> str:
+    """Check a single concrete user: `user:<sub>`. Not a userset or wildcard.
+
+    For places where only one person can be meant, such as the end user a
+    delegate acts for. Mirrors the control plane's own check on `on_behalf_of`.
+    """
+    validate_subject(value, what)
+    if not value.startswith("user:") or "#" in value or value == "user:*":
+        raise ValueError(f"gx-auth-sdk: {what} must be a single user, 'user:<sub>', got {value!r}")
     return value
 
 

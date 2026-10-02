@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 
 from .config import get_config
-from .ids import validate_object, validate_subject
+from .ids import validate_object, validate_subject, validate_user
 
 
 def _post(
@@ -22,7 +22,7 @@ def _post(
     validate_object(obj, f"{verb} object")
     body = {"subject": subject, "relation": relation, "object": obj, "reason": reason}
     if on_behalf_of is not None:
-        validate_subject(on_behalf_of, f"{verb} on_behalf_of")
+        validate_user(on_behalf_of, f"{verb} on_behalf_of")
         body["on_behalf_of"] = on_behalf_of
     cfg = get_config()
     resp = httpx.request(

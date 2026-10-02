@@ -139,6 +139,23 @@ def test_unauthenticated_is_rejected(client, fake_fga):
     assert resp.status_code == 401
 
 
+@pytest.mark.django_db
+def test_policy_checks_use_higher_consistency(client, fake_fga, service_user):
+    """A role revoked a moment ago must not still authorize a control-plane
+    action, so every policy check bypasses the engine's caches (docs/003)."""
+    fake_fga.allowed |= {
+        (SERVICE, "delegate", PLATFORM),
+        ("user:carol", "can_administer", "project:1"),
+    }
+    api = _caller(client, service_user)
+
+    api("post", "grants", _grant(on_behalf_of="user:carol"))  # delegate + admin checks
+    api("post", "check", {"user": "user:bob", "relation": "can_view", "object": "project:1"})
+
+    # delegate, can_administer, delegate (query authz), then the query itself
+    assert fake_fga.check_consistency == ["HIGHER_CONSISTENCY"] * 3 + [None]
+
+
 # --- grants: what may be written -------------------------------------------
 
 

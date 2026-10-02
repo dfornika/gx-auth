@@ -1,7 +1,7 @@
 """Tests for the id validation module."""
 
 import pytest
-from gx_auth_sdk.ids import validate_object, validate_subject, validate_type
+from gx_auth_sdk.ids import validate_object, validate_subject, validate_type, validate_user
 
 
 class TestValidateSubject:
@@ -99,3 +99,17 @@ class TestValidateType:
     def test_whitespace(self):
         with pytest.raises(ValueError, match="bare type name"):
             validate_type("sample foo")
+
+
+class TestValidateUser:
+    def test_single_user(self):
+        assert validate_user("user:abc123") == "user:abc123"
+
+    @pytest.mark.parametrize("value", ["project:1", "group:lab#member", "user:*", "user:abc#x"])
+    def test_rejects_anything_but_one_user(self, value):
+        with pytest.raises(ValueError, match="single user"):
+            validate_user(value)
+
+    def test_malformed_id_reports_the_shallow_error(self):
+        with pytest.raises(ValueError, match="empty id"):
+            validate_user("user:")

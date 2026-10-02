@@ -79,7 +79,9 @@ def _caller_subject(caller) -> str:
 
 
 def is_delegate(subject: str) -> bool:
-    return fga.check(subject, "delegate", platform_object())
+    # Higher consistency, like every check in this module: a role revoked a
+    # moment ago must not still authorize a control-plane action (docs/003).
+    return fga.check(subject, "delegate", platform_object(), higher_consistency=True)
 
 
 def resolve_actor(caller, on_behalf_of: str | None) -> Actor:
@@ -116,6 +118,7 @@ def can_manage_grants(actor: Actor, obj: str) -> bool:
         contextual_tuples=[
             fga.Relationship(user=platform_object(), relation="platform", object=obj)
         ],
+        higher_consistency=True,
     )
 
 

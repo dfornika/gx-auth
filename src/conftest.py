@@ -117,6 +117,7 @@ class FakeFgaClient:
         self.writes: list[tuple[str, str, str]] = []
         self.deletes: list[tuple[str, str, str]] = []
         self.fail_writes = False
+        self.check_consistency: list[str | None] = []  # per check, in call order
         self.calls: list[tuple] = []
 
     # context-manager surface used by fga._client()
@@ -182,6 +183,7 @@ class FakeFgaClient:
     def check(self, body, options=None):
         ctx = tuple((t.user, t.relation, t.object) for t in (body.contextual_tuples or []))
         self.calls.append(("check", body.user, body.relation, body.object, ctx))
+        self.check_consistency.append((options or {}).get("consistency"))
         return CheckResponse(allowed=(body.user, body.relation, body.object) in self.allowed)
 
     def list_objects(self, body, options=None):
