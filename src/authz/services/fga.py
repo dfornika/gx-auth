@@ -16,6 +16,7 @@ from datetime import datetime
 from django.conf import settings
 from openfga_sdk import (
     ClientConfiguration,
+    ConsistencyPreference,
     FgaObject,
     ReadRequestTupleKey,
     UserTypeFilter,
@@ -114,12 +115,16 @@ def check(
     *,
     context: dict | None = None,
     contextual_tuples: list[Relationship] | None = None,
+    higher_consistency: bool = False,
 ) -> bool:
     """Return whether `user` has `relation` on `obj`.
 
     `context` supplies condition parameters (e.g. {"required_level": 3}).
     `contextual_tuples` assert not-yet-persisted relationships for
     read-after-write flows (see docs/003-integration-and-sync.md).
+    `higher_consistency` asks the engine to bypass its caches, so a tuple
+    deleted a moment ago cannot still answer True. It costs latency, so use it
+    for security-sensitive decisions only, not globally (docs/003).
     """
     ctx_tuples = [
         ClientTuple(user=t.user, relation=t.relation, object=t.object)
@@ -133,7 +138,12 @@ def check(
                 object=obj,
                 context=context or None,
                 contextual_tuples=ctx_tuples or None,
-            )
+            ),
+            options=(
+                {"consistency": ConsistencyPreference.HIGHER_CONSISTENCY}
+                if higher_consistency
+                else None
+            ),
         )
     return bool(resp.allowed)
 

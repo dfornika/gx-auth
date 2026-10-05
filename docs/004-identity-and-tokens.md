@@ -119,9 +119,15 @@ for it. Tracked in [issue #4](https://github.com/dfornika/gx-auth/issues/4).
 
 - `POST /api/authz/check` — decision endpoint (thin wrapper over OpenFGA `Check`),
   for callers that prefer a domain API over the raw engine, and for audit.
-- `GET  /api/authz/list-objects` — `ListObjects` wrapper.
-- `POST /api/authz/grants` / `DELETE /api/authz/grants/...` — domain grant/revoke,
-  audited (the write path from doc 003).
+- `POST /api/authz/list-objects` — `ListObjects` wrapper.
+- `POST /api/authz/grants` / `DELETE /api/authz/grants` — domain grant/revoke of
+  project roles, audited (the write path from doc 003).
+
+These endpoints authorize their callers ([ADR 0004](./decisions/0004-control-plane-authorizes-itself.md)):
+`check`/`list-objects` answer only about the caller unless it is a platform
+`delegate`, and a grant needs `can_administer` on the project. A delegate
+(typically a consuming service's account) passes `on_behalf_of: user:<sub>` so
+the grant is checked against, and audited as, the end user who asked for it.
 - `GET  /api/auth/me`, API-key management — mirrors GX Core's `accounts` app.
 
 Hot-path `Check`s from services may also talk to OpenFGA directly (doc 001); the

@@ -131,6 +131,10 @@ FGA_MODEL_ID = env.str("FGA_MODEL_ID", default="")  # empty -> use store's lates
 # The decision hot path is unaffected.
 FGA_INSPECTOR_TIMEOUT_MS = env.int("FGA_INSPECTOR_TIMEOUT_MS", default=5000)
 
+# The `platform:<id>` object holding control-plane roles (platform admins and
+# delegates). See authz/policy.py and ADR 0004.
+GXAUTH_PLATFORM_ID = env.str("GXAUTH_PLATFORM_ID", default="gx")
+
 # --- Cognito / Entra OIDC (set OIDC_ENABLED=true to activate) ----------------
 # See docs/004-identity-and-tokens.md. The token is identity-only; all
 # authorization lives in OpenFGA. Swapping Cognito for Entra is a config change.

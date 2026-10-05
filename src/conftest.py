@@ -5,10 +5,12 @@ from pathlib import Path
 import pytest
 from openfga_sdk import (
     AuthorizationModel,
+    CheckResponse,
     Computed,
     ExpandResponse,
     FgaObject,
     Leaf,
+    ListObjectsResponse,
     ListUsersResponse,
     Metadata,
     Node,
@@ -109,6 +111,14 @@ class FakeFgaClient:
         self.users = list(users or [])
         self.model = model  # what a pinned FGA_MODEL_ID resolves to
         self.latest_model = latest_model  # set to simulate a stale pin
+        # (user, relation, object) triples `check` answers True for. The fake
+        # makes no decisions of its own — the model tests cover those.
+        self.allowed: set[tuple[str, str, str]] = set()
+        self.writes: list[tuple[str, str, str]] = []
+        self.deletes: list[tuple[str, str, str]] = []
+        self.fail_writes = False
+        self.on_write = None  # optional callback, run as the engine write lands
+        self.check_consistency: list[str | None] = []  # per check, in call order
         self.calls: list[tuple] = []
 
     # context-manager surface used by fga._client()
@@ -170,6 +180,34 @@ class FakeFgaClient:
             elif o.partition(":")[0] != obj_type:
                 return False
         return True
+
+    def check(self, body, options=None):
+        ctx = tuple((t.user, t.relation, t.object) for t in (body.contextual_tuples or []))
+        self.calls.append(("check", body.user, body.relation, body.object, ctx))
+        self.check_consistency.append((options or {}).get("consistency"))
+        return CheckResponse(allowed=(body.user, body.relation, body.object) in self.allowed)
+
+    def list_objects(self, body, options=None):
+        self.calls.append(("list_objects", body.user, body.relation, body.type))
+        return ListObjectsResponse(
+            objects=sorted(
+                o
+                for u, r, o in self.allowed
+                if u == body.user and r == body.relation and o.startswith(f"{body.type}:")
+            )
+        )
+
+    def write(self, body, options=None):
+        if self.on_write is not None:
+            self.on_write()
+        if self.fail_writes:
+            raise ValidationException(status=400, reason="simulated engine write failure")
+        writes = [(t.user, t.relation, t.object) for t in (body.writes or [])]
+        deletes = [(t.user, t.relation, t.object) for t in (body.deletes or [])]
+        self.writes += writes
+        self.deletes += deletes
+        # Keep `read` truthful about what was written.
+        self.tuples = [t for t in self.tuples if t not in deletes] + writes
 
     def expand(self, body, options=None):
         key = (body.object, body.relation)
