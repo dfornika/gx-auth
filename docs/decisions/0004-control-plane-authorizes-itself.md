@@ -58,8 +58,17 @@ facts shape the fix:
    evaluated as itself.
 6. **Callers query only themselves.** `check` / `list-objects` answer about
    the caller's own subject. Asking about another subject requires `delegate`.
-7. **Audit and write are one unit.** The `GrantAudit` row is created inside a
-   transaction before the engine write, so a failed write rolls the row back.
+7. **No change reaches the store without a committed audit row.** OpenFGA
+   cannot join a database transaction, so the two writes are never atomic.
+   Instead, `authz/services/grants.py` commits the `GrantAudit` row as
+   `pending` *before* the engine write, then marks it `applied` or `failed`.
+   If the process dies in between, or the status update fails, the row stays
+   `pending`. The outcome is then unknown, but recorded.
+   `manage.py reconcile_grant_audit` settles stale `pending` rows by reading
+   the store. It leaves rows superseded by a later change to the same tuple
+   for a human. This covers grants made through gx-auth only. Comparing the
+   whole audit log against the live store (drift from writes that bypassed
+   gx-auth) is still the broader reconciliation job in docs/003.
 
 ## Consequences
 

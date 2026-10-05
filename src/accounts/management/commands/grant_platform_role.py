@@ -1,9 +1,8 @@
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
 
 from authz import policy
 from authz.models import GrantAudit
-from authz.services import fga
+from authz.services import fga, grants
 
 _ROLES = ("admin", "delegate")
 
@@ -36,22 +35,12 @@ class Command(BaseCommand):
         subject = f"user:{sub}"
         obj = policy.platform_object()
         action = GrantAudit.Action.REVOKE if opts["revoke"] else GrantAudit.Action.GRANT
-        rel = fga.Relationship(user=subject, relation=opts["role"], object=obj)
-
-        # Same ordering as the grants API: a failed engine write rolls the
-        # audit row back.
-        with transaction.atomic():
-            GrantAudit.objects.create(
-                action=action,
-                subject=subject,
-                relation=opts["role"],
-                object=obj,
-                performed_by=None,
-                reason=opts["reason"] or f"grant_platform_role ({action})",
-            )
-            if action == GrantAudit.Action.GRANT:
-                fga.write_tuple(rel)
-            else:
-                fga.delete_tuple(rel)
+        # Same audited path as the grants API: the row is committed before
+        # the engine write.
+        grants.apply(
+            action,
+            fga.Relationship(user=subject, relation=opts["role"], object=obj),
+            reason=opts["reason"] or f"grant_platform_role ({action})",
+        )
 
         self.stdout.write(f"{action} {subject} {opts['role']} {obj}")

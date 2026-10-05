@@ -11,14 +11,13 @@ a caller queries only its own permissions unless it is a platform delegate,
 and manages grants on a project only if the actor holds `can_administer` there.
 """
 
-from django.db import transaction
 from ninja import Router, Schema
 from ninja.errors import HttpError
 from pydantic import field_validator, model_validator
 
 from . import policy
 from .models import GrantAudit
-from .services import fga
+from .services import fga, grants
 from .validators import validate_object, validate_relation, validate_subject, validate_type_name
 
 router = Router(tags=["authz"])
@@ -170,29 +169,16 @@ def _authorize_grant(request, payload: GrantIn) -> policy.Actor:
 
 
 def _apply(request, payload: GrantIn, action: GrantAudit.Action) -> None:
-    """Authorize, then audit and write as one unit.
-
-    The audit row is created first, inside the transaction, so a failed engine
-    write rolls it back. The window left is an engine write that succeeds
-    followed by a failed commit — rare, and the reconciliation job (docs/003)
-    is what closes it.
-    """
+    """Authorize, then make the audited change (see `services.grants` for the
+    audit-before-write ordering)."""
     actor = _authorize_grant(request, payload)
-    rel = fga.Relationship(user=payload.subject, relation=payload.relation, object=payload.object)
-    with transaction.atomic():
-        GrantAudit.objects.create(
-            action=action,
-            subject=payload.subject,
-            relation=payload.relation,
-            object=payload.object,
-            performed_by=request.user,
-            on_behalf_of=actor.subject if actor.delegate else "",
-            reason=payload.reason,
-        )
-        if action == GrantAudit.Action.GRANT:
-            fga.write_tuple(rel)
-        else:
-            fga.delete_tuple(rel)
+    grants.apply(
+        action,
+        fga.Relationship(user=payload.subject, relation=payload.relation, object=payload.object),
+        performed_by=request.user,
+        on_behalf_of=actor.subject if actor.delegate else "",
+        reason=payload.reason,
+    )
 
 
 @router.post("/grants", response={201: None})

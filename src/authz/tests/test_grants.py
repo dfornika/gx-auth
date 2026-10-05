@@ -244,14 +244,46 @@ def test_malformed_on_behalf_of_is_rejected(api, fake_fga, on_behalf_of):
 
 
 @pytest.mark.django_db
-def test_failed_engine_write_leaves_no_audit_row(api, fake_fga):
+def test_audit_row_is_committed_pending_before_the_engine_write(api, fake_fga):
+    """No change may reach the store without an audit row already committed."""
+    fake_fga.allowed.add((ALICE, "can_administer", "project:1"))
+    seen = []
+    fake_fga.on_write = lambda: seen.extend(GrantAudit.objects.values_list("status", flat=True))
+
+    resp = api("post", "grants", _grant())
+
+    assert resp.status_code == 201
+    assert seen == ["pending"]
+    assert GrantAudit.objects.get().status == GrantAudit.Status.APPLIED
+
+
+@pytest.mark.django_db
+def test_failed_engine_write_is_recorded_as_failed(api, fake_fga):
     fake_fga.allowed.add((ALICE, "can_administer", "project:1"))
     fake_fga.fail_writes = True
 
     with pytest.raises(Exception, match="simulated engine write failure"):
         api("post", "grants", _grant())
 
-    assert not GrantAudit.objects.exists()
+    assert GrantAudit.objects.get().status == GrantAudit.Status.FAILED
+
+
+@pytest.mark.django_db
+def test_status_update_failure_leaves_row_pending_not_lost(api, fake_fga, monkeypatch):
+    """If recording the outcome fails, the grant still succeeded: the row stays
+    `pending` for reconcile_grant_audit rather than the request erroring."""
+    fake_fga.allowed.add((ALICE, "can_administer", "project:1"))
+
+    def broken_filter(*args, **kwargs):
+        raise RuntimeError("db went away")
+
+    monkeypatch.setattr(GrantAudit.objects, "filter", broken_filter)
+    resp = api("post", "grants", _grant())
+    monkeypatch.undo()
+
+    assert resp.status_code == 201
+    assert fake_fga.writes == [("user:bob", "member", "project:1")]
+    assert GrantAudit.objects.get().status == GrantAudit.Status.PENDING
 
 
 # --- check / list-objects: who may ask about whom --------------------------

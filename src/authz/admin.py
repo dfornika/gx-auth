@@ -14,8 +14,9 @@ class GrantAuditAdmin(ModelAdmin):
         "object",
         "performed_by",
         "on_behalf_of",
+        "status",
     )
-    list_filter = ("action", "relation")
+    list_filter = ("action", "status", "relation")
     search_fields = ("subject", "object", "relation", "on_behalf_of")
     readonly_fields = (
         "action",
@@ -24,6 +25,7 @@ class GrantAuditAdmin(ModelAdmin):
         "object",
         "performed_by",
         "on_behalf_of",
+        "status",
         "reason",
         "created_at",
     )

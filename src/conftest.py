@@ -117,6 +117,7 @@ class FakeFgaClient:
         self.writes: list[tuple[str, str, str]] = []
         self.deletes: list[tuple[str, str, str]] = []
         self.fail_writes = False
+        self.on_write = None  # optional callback, run as the engine write lands
         self.check_consistency: list[str | None] = []  # per check, in call order
         self.calls: list[tuple] = []
 
@@ -197,10 +198,16 @@ class FakeFgaClient:
         )
 
     def write(self, body, options=None):
+        if self.on_write is not None:
+            self.on_write()
         if self.fail_writes:
             raise ValidationException(status=400, reason="simulated engine write failure")
-        self.writes += [(t.user, t.relation, t.object) for t in (body.writes or [])]
-        self.deletes += [(t.user, t.relation, t.object) for t in (body.deletes or [])]
+        writes = [(t.user, t.relation, t.object) for t in (body.writes or [])]
+        deletes = [(t.user, t.relation, t.object) for t in (body.deletes or [])]
+        self.writes += writes
+        self.deletes += deletes
+        # Keep `read` truthful about what was written.
+        self.tuples = [t for t in self.tuples if t not in deletes] + writes
 
     def expand(self, body, options=None):
         key = (body.object, body.relation)

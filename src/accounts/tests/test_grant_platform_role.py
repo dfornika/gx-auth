@@ -23,6 +23,7 @@ def test_grants_platform_admin_and_audits(fake_fga):
     assert (audit.action, audit.subject, audit.object) == ("grant", "user:sub-olga", "platform:gx")
     assert audit.performed_by is None
     assert audit.reason == "on-call"
+    assert audit.status == GrantAudit.Status.APPLIED
 
 
 @pytest.mark.django_db
@@ -49,8 +50,8 @@ def test_rejects_anything_but_a_bare_sub(fake_fga, sub):
 
 
 @pytest.mark.django_db
-def test_failed_engine_write_leaves_no_audit_row(fake_fga):
+def test_failed_engine_write_is_recorded_as_failed(fake_fga):
     fake_fga.fail_writes = True
     with pytest.raises(Exception, match="simulated engine write failure"):
         run("admin", "sub-olga")
-    assert not GrantAudit.objects.exists()
+    assert GrantAudit.objects.get().status == GrantAudit.Status.FAILED
