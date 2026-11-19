@@ -1,121 +1,127 @@
-# 003 — Integration & tuple sync
+# 003 — Integration and tuple sync
 
-This is the hardest part of the system. Read it before committing to the design.
-ReBAC gives you an expressive, cross-service authorization plane; the price is
-that **relationship tuples live in OpenFGA while the resources they describe live
-in each service's own Postgres**, and those two stores must be kept consistent.
+The hard part of this design is not the engine. It is that **tuples live in
+OpenFGA, while the resources they describe live in each service's own
+database**. Every relationship the model depends on has to be written to
+OpenFGA, and kept correct as resources are created, moved and deleted. Read
+this before integrating a service.
 
-## Enforcement: services call `Check` (the read path)
+## Reads: services ask the engine
 
-Each service keeps its own request handling and calls `Check` at its enforcement
-points. Nothing about a service's endpoints moves into gx-auth — it gets a shared
-brain, not a shared gatekeeper.
+A service validates the caller's token, then checks at its enforcement points:
 
 ```python
-# GX Core, returning an analysis output
-user_id = request.auth.sub          # from the validated OIDC token — identity only
-allowed = fga.check(
-    user=f"user:{user_id}",
-    relation="can_view",
-    object=f"analysis_output:{output_id}",
-)
-if not allowed:
+subject = f"user:{request.user.sub}"          # identity from the token only
+if not authz.check(subject, "can_view", f"project:{project_id}"):
     raise HttpError(403, "forbidden")
 ```
 
-For list endpoints, use `ListObjects` to get the set of visible ids, then filter
-the service's own query:
+`authz` is `gx_auth_sdk`. It validates ids before calling the engine, and
+raises on an obviously malformed one rather than letting OpenFGA answer
+`False` (doc 004).
+
+For lists, ask which ids are visible, then filter the service's own query.
+The store is shared across services, so **keep only ids you own**:
 
 ```python
-ids = fga.list_objects(user=f"user:{user_id}", relation="can_view", type="sample")
-qs = Sample.objects.filter(pk__in=[strip_type(o) for o in ids])
+visible = authz.list_objects(subject, "can_view", "project")
+ids = [o.removeprefix("project:") for o in visible]
+Project.objects.filter(project_id__in=ids)
 ```
 
-### The two performance realities
+### Performance
 
-- **`Check`** is cheap (low single-digit ms), including the network hop. Fine on
-  the hot path.
-- **`ListObjects`** is materially heavier and is the #1 ReBAC scaling gotcha.
-  Over large sample sets it can be slow or need pagination/streaming
-  (`StreamedListObjects`). **Prototype this against your real per-project sample
-  counts early.** If it does not hold up, the usual mitigations are: constrain
-  lists to a single project scope first, denormalize enough into the service DB
-  to pre-filter, or cache decisions briefly.
+- **Check** is cheap: single-digit milliseconds, including the network hop.
+- **ListObjects** is the main scaling risk in any Zanzibar-style system. It
+  is fine over projects. Over tens of thousands of samples it can be slow.
+  This has **not yet been measured** at realistic volumes. If it does not
+  hold up:
+  - list within one project first;
+  - check at project level and resolve resources locally;
+  - or keep enough in the service database to pre-filter.
 
-## The write path: keeping tuples in sync
+## Writes: keeping tuples in sync
 
-When a resource is created/moved/shared, or a membership changes, the
-corresponding tuple(s) must be written to OpenFGA. In a single database a `JOIN`
-gives you this consistency for free; here it is a distributed-data problem. Pick
-a strategy deliberately.
+Three kinds of tuple, with different owners:
 
-### Options
+| tuple | example | owner | written by |
+|---|---|---|---|
+| **Role grants** | `user:U admin project:P` | gx-auth | the grants API, audited |
+| **Structure** | `project:P parent project:C`, `project:P project sample:S` | the service that owns the resource | the service, directly (today) |
+| **Platform roles** | `user:U delegate platform:gx` | gx-auth operators | `grant_platform_role` |
 
-1. **Synchronous write-through via the gx-auth control plane (recommended start).**
-   Domain operations ("create sample", "add editor", "publish project") call
-   gx-auth, which writes the tuple(s) and records an audit entry. Simple, one
-   code path, easy to reason about. Risk: a tuple write can fail after the
-   resource commit (or vice versa) — mitigate with a reconciliation job (below).
+The model itself (`model.fga`) belongs to gx-auth alone. It is versioned and
+rolled out with the `fga` CLI (`src/fga/README.md`).
 
-2. **Transactional outbox in each service.** The service writes the resource and
-   an outbox row in the same DB transaction; a relay drains the outbox to
-   OpenFGA. Strong local atomicity, at-least-once delivery to FGA. More moving
-   parts. This is the target for high write volumes.
+### Role grants (built)
 
-3. **Event stream.** Services publish domain events; a gx-auth consumer projects
-   them into tuples. Best decoupling, most infrastructure.
+`POST/DELETE /api/authz/grants` authorizes the actor, then goes through
+`authz/services/grants.py`:
 
-Start with **(1)** for GX Core adoption, and design the data model so a move to
-**(2)** later is mechanical. In all cases the leaf-flattening decision from doc
-002 keeps the number of tuples per resource small.
+1. commit a `GrantAudit` row as `pending`;
+2. write the tuple to OpenFGA;
+3. mark the row `applied`, or `failed`.
 
-### Reconciliation is not optional
+The two stores cannot share a transaction, so this ordering is the guarantee:
+no grant reaches OpenFGA without an audit row already committed. A crash
+between steps leaves a `pending` row. `manage.py reconcile_grant_audit`
+settles those rows by reading the store.
 
-Whatever the write path, run a periodic **reconciliation/repair job** that walks
-each service's resources and asserts the expected tuples exist in OpenFGA
-(writing any missing, deleting any orphaned). Drift *will* happen — a failed
-write, a manual DB edit, a bug. Reconciliation is what makes the eventual
-consistency safe to rely on. gx-auth is the natural home for this job.
+### Structural tuples (not built)
 
-## Consistency semantics (read-after-write)
+Nothing writes these yet. A service creating a project, sub-project or sample
+must write the matching edge, and that write can fail after the service's own
+commit succeeds. The options, from simplest to most robust:
 
-OpenFGA is eventually consistent by default. Most authorization is tolerant of a
-brief lag, but some flows are not — e.g. a user is granted access and immediately
-expects to see the resource. Handle those explicitly:
+1. **Write-through.** Write the tuple right after the resource commit, and
+   repair failures later. Simple, but it relies on reconciliation (below).
+2. **Transactional outbox.** The service commits the resource and an outbox
+   row together, and a relay drains the outbox to OpenFGA. Delivery is
+   at least once, but with more moving parts.
+3. **Event stream.** Services publish domain events, and a consumer turns
+   them into tuples. The most decoupled, and the most infrastructure.
 
-- Use OpenFGA's **higher-consistency** read option on the checks that need
-  read-after-write.
-- Or pass **contextual tuples** in the `Check` call to assert a just-made
-  relationship that may not have propagated yet.
+The choice is open. Whichever it is, the fewer structural tuples a service
+needs, the smaller this problem gets. A service that checks only at project
+level, and maps its own resources to projects locally, needs just the
+project's own edges.
 
-Decide per-flow; do not globally force strong consistency (it costs latency).
+### Reconciliation
 
-## Who owns which tuples?
+Drift will happen: a failed write, a manual database edit, a bug. A periodic
+job should compare each service's resources with the store, writing missing
+tuples and removing orphans. Only the narrow audit-log case above exists today
+(`reconcile_grant_audit`). The general job is unbuilt, and gx-auth is its
+natural home.
 
-- **Resource-derived tuples** (a sample belongs to a project, a leaf's `project`
-  pointer): owned by the service that owns the resource, written via its chosen
-  write path. gx-auth provides the endpoint/library; the service triggers it.
-- **Grant tuples** (U is an editor of project P; team T is a viewer of P): owned
-  by gx-auth's domain grant API, always audited, and authorized against the
-  actor's `can_administer` on P (ADR 0004). A service granting for a user passes
-  `on_behalf_of`.
-- **The authorization model** (the `.fga` schema): owned by gx-auth exclusively,
-  versioned, and rolled out via the OpenFGA CLI (see `src/fga/README.md`).
+## Consistency
 
-## Failure modes to design for
+OpenFGA reads are eventually consistent by default. Most checks tolerate a
+brief lag. Where they cannot, choose per flow rather than globally:
 
-| Failure | Effect | Mitigation |
+- **Higher consistency.** Asks the engine to bypass its caches. gx-auth's
+  wrapper (`fga.check(..., higher_consistency=True)`) uses it for every
+  control-plane policy check, so a role revoked a moment ago cannot still
+  authorize a change. The SDK does not expose it yet.
+- **Contextual tuples.** Pass a just-written relationship along with the
+  check. This suits "I was just granted access and want to see it now".
+
+## Failure modes
+
+| failure | effect | mitigation |
 |---|---|---|
-| OpenFGA unavailable | `Check` fails | Services fail **closed** (deny) on the hot path; short local cache optional. Treat OpenFGA as tier-0 infra (HA, backups). |
-| Tuple write fails after resource commit | resource exists, no access | Reconciliation job; write-through returns error so caller can retry. |
-| Model change breaks a relation | wrong decisions | Version the model; test with the FGA model test DSL before rollout; roll forward. |
-| `ListObjects` too slow at scale | slow list endpoints | Scope-first, denormalize, or cache; prototype early. |
+| OpenFGA unavailable | checks fail | Fail **closed** (deny). Treat OpenFGA as tier-0: HA and backups. |
+| Tuple write fails after the resource commit | resource exists, no access | Reconciliation; write-through returns an error so the caller can retry. |
+| Model change drops a relation | wrong decisions | Model tests before rollout; see "Changing the model" in doc 002. |
+| `ListObjects` too slow | slow list pages | Scope to a project, check at project level, or pre-filter locally. |
 
-## Open questions to resolve before building the sync layer
+## Open questions
 
-1. **Sample/leaf volume:** how many leaf resources per project, and how big can
-   the biggest project get? Drives `ListObjects` viability and the flatten
-   decision.
-2. **Group/team origin:** is there an org/team concept above `project` that
-   grants access broadly, or is it all per-project grants today? Drives whether
-   the `group` type earns its place on day one.
+1. **Who owns "project"?** If one project spans several services (metadata
+   in SMS, reads in SDS), something must issue its id and own its lifecycle.
+   If each service's projects are separate, their ids must not collide in the
+   shared store.
+2. **How many resources per project**, and how large is the largest project?
+   This decides whether resource-level tuples are viable at all.
+3. **Is there a team or organization above projects** that grants access
+   broadly? If so, the `group` type earns its place now.

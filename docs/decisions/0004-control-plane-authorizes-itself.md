@@ -80,7 +80,7 @@ facts shape the fix:
 - **Hardening path: forward the user's token.** A later step can have
   delegates pass the end user's IdP token, validated by gx-auth, instead of
   asserting `on_behalf_of`. That removes the trust without changing rule 1.
-  It needs shared JWT validation (see the review note on token validation)
+  It needs shared JWT validation (see the open questions in doc 004)
   and a story for background jobs that have no user token.
 - **Bootstrapping a deployment** is now: create the store and write the model
   (`fga_bootstrap`), then `grant_platform_role admin <sub>` for the operators
