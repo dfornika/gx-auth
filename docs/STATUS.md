@@ -1,82 +1,78 @@
-# Where this is up to — 2026-07-24
+# Status
 
-Working notes for picking the OpenFGA inspector work back up. Not a design doc;
-delete it once the branch merges and the follow-ups have homes.
+Where gx-auth stands, and what is open. Update this file as items close; it
+replaces the July 2026 working notes, which are in git history.
 
-## Done
+## Built
 
-Branch `feat/fga-admin-inspector` (commit `a02ae3f`), pushed, no PR opened yet.
-49 tests pass, ruff clean, all three pages verified against a live store.
+- **Model.** Projects with nested inheritance; samples and analysis outputs
+  inheriting from their project; a `platform` type for control-plane roles.
+  Covered by offline model tests (doc 002).
+- **Control-plane API.** `check`, `list-objects`, and audited `grants`. The
+  API authorizes its own callers: an actor needs `can_administer` to change a
+  role, and delegates may act for end users (ADR 0004).
+- **Audit.** Every grant and revoke is recorded before it is applied;
+  `reconcile_grant_audit` settles rows whose outcome is unknown (doc 003).
+- **Identity.** OIDC login (Cognito), API keys, the `user:<sub>` subject
+  contract, and `provision_user` for users who have not signed in yet (doc
+  004).
+- **Admin inspector.** Read-only pages for live tuples (`/admin/fga/tuples/`),
+  why a relation resolves (`/admin/fga/expand/`) and the project tree
+  (`/admin/fga/tree/`).
+- **SDK** (`sdk/`, 0.2.0). `check`, `list_objects`, tuple writes, audited
+  `grant`/`revoke` with `on_behalf_of`, id validation, and a Cognito JWT
+  authenticator.
+- **First consumer.** sequence-data-submission-service answers per-project
+  checks from OpenFGA when `AUTHZ_BACKEND=gxauth`. It is read-only so far:
+  its role changes still go to its local store.
 
-Three superuser-only read-only pages, hosted in the admin:
+## Open, roughly by priority
 
-| page | shows |
-|---|---|
-| `/admin/fga/tuples/` | live tuples, filterable, paginated, with a scan fallback |
-| `/admin/fga/expand/` | why an `object#relation` resolves, down to the users |
-| `/admin/fga/tree/` | the `parent` hierarchy that roles inherit down |
+1. **Who owns "project"?** One id space is shared by every service. Decide
+   whether a project spans services (and who issues its id), or whether ids
+   need namespacing so separate projects cannot collide. This blocks a second
+   consumer.
+2. **OpenFGA has no authentication.** Anything with network access can write
+   tuples, which bypasses the control plane and its audit log. Fix this before
+   services call the engine directly anywhere but a developer's machine.
+3. **Structural tuples have no write path.** Nothing writes `parent` or
+   `project` edges when services create resources. Choose write-through,
+   outbox or events (doc 003).
+4. **General reconciliation.** Compare each service's resources with the
+   store, and the audit log with live tuples. Only role grants are audited, so
+   structural tuples need a separate "not audited by design" category, or
+   every one of them will show as drift.
+5. **`ListObjects` at realistic volume.** Not yet measured. It needs no cloud
+   resources and decides whether resource-level tuples are viable.
+6. **Token handling** (doc 004). The SDK accepts only ID tokens, which shuts
+   out machine-to-machine clients, and SDS's own bearer validation is too
+   loose.
+7. **Hot-path timeouts.** The SDK uses the OpenFGA client's defaults (minutes,
+   with retries) and a new client per call. An engine outage would hang
+   request workers instead of failing closed quickly.
+8. **Service-specific permissions.** `can_create` means "submit sequences" in
+   SDS, and would mean something else elsewhere. Consider permissions named
+   per service, derived from the shared roles.
+9. **Deployment.** No cloud deployment yet. Pin the OpenFGA image: `compose.yml`
+   uses `openfga/openfga:latest`.
 
-Reachable from the `GrantAudit` changelist, which now carries three links.
+### Inspector follow-ups
 
-The commit message is the detailed record — it documents every OpenFGA
-behaviour discovered while building this (Read's filter rules, the mutated
-options dict, blank-vs-None filters, Expand not resolving through
-tuple-to-userset, urllib3 errors escaping the SDK). Read it with
-`git show a02ae3f --stat` or `git log -1`.
-
-**This completes the approved plan.** Everything below was explicitly deferred,
-not left unfinished.
-
-## Not done — inspector follow-ups
-
-- **Orphaned-tuple check** (new; probably do this first). After any model change,
-  answer "which stored tuples reference types or relations the active model no
-  longer defines?" Those tuples still exist and still read, but any access they
-  granted is silently gone. The classification logic already exists as a
-  throwaway script from this session; it is a small page.
-- **Model viewer.** `fga.read_model()` already returns what it needs. Would also
-  enable a store-model vs `fga/model.json` drift check.
-- **Check / list-objects sandbox.** Forms over the existing `fga.check()` and
-  `fga.list_objects()`. Label it loudly so it is not mistaken for a write UI.
-- **GrantAudit vs live-tuple drift.** Caveat that matters: only *role* grants go
-  through the audited path, so a naive diff flags every structural `parent` /
-  `project` tuple as unaudited and buries the real signal. Needs a relation
-  allowlist and a third "structural — not audited by design" bucket.
-
-## Not done — wider open questions (predate this work)
-
-- **`ListObjects` performance at realistic scale.** `docs/003` calls it the #1
-  ReBAC gotcha and says to prototype it early; still untested against real
-  per-project sample counts. Needs no AWS. Highest-value experiment available.
-- **Tuple-sync strategy.** `docs/003` recommends write-through, but gx-poc has
-  settled informally on a hybrid — role grants audited through the control
-  plane, structural edges written straight to OpenFGA. If that hybrid is the
-  intended endpoint, the "all writes go through gx-auth" rule in `CLAUDE.md`
-  needs rewording.
-- **OpenFGA has no authn configured.** Anything with network reach can `Write`,
-  not only `Check`, which undercuts the audit story given consumers are meant to
-  call the engine directly on the hot path.
-- **Pin the OpenFGA image.** `compose.yml` uses `openfga/openfga:latest` for both
-  services, so server behaviour can change under you on any `docker compose pull`.
-- **AWS deployment.** `infrastructure/` (TypeScript CDK) is still untracked and
-  never deployed; the plan is a Python CDK rewrite against the existing work dev
-  environment. Its real value is the bootstrap runbook, not the constructs. Note
-  it puts both databases on one RDS instance, unlike local dev's two containers.
+- **Orphaned tuples.** List stored tuples whose type or relation the active
+  model no longer defines. Their access is silently gone. Probably first.
+- **Model viewer**, with a check for drift between the store's model and
+  `fga/model.json`.
+- **Check / list-objects sandbox.** Forms over the existing functions,
+  clearly marked as read-only.
 
 ## Environment gotchas
 
-- **`.env` is gitignored**, so `FGA_STORE_ID` / `FGA_MODEL_ID` do not travel
-  between machines. Leave `FGA_MODEL_ID` blank to track the store's latest model
-   — a stale pin here meant gx-auth was answering against a superseded 12-type
-  model while `model.fga` on disk was the 4-type one. The inspector's status
-  strip now warns about this.
-- **Two Postgres containers locally:** `db` holds `gxauth` (Django, managed by
-  `just migrate`), `openfga-db` holds `openfga` (OpenFGA's own schema, managed by
-  its `migrate` command via the `openfga-migrate` compose service). Tuples are
-  rows in the `tuple` table there. Never write to it directly with SQL — that
+- **`.env` is gitignored**, so `FGA_STORE_ID` and `FGA_MODEL_ID` do not travel
+  between machines. Leave `FGA_MODEL_ID` blank to follow the store's latest
+  model; a stale pin silently answers against an old model. The inspector
+  warns when this happens.
+- **Two Postgres databases locally.** `db` holds gx-auth's Django data;
+  `openfga-db` holds OpenFGA's. Never edit OpenFGA's tables with SQL, which
   bypasses model validation.
-- **Model changes never migrate existing tuples.** Removing a *type* silently
-  makes dependent access evaporate while the tuples remain; removing a
-  *relation* makes checks fail loudly with a 400. Derived relations (`can_*`)
-  have no tuples behind them and are free to change; storable relations
-  (`admin`, `member`, `viewer`, `parent`, `project`) are a data migration.
+- **Editing `.env` needs a container recreate** (`just reload <service>`).
+  `docker compose restart` keeps the old environment.

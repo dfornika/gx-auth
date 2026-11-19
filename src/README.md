@@ -34,16 +34,31 @@ not exposed): `just fga-check`, `just fga-tuple-write`, `just fga-model-list`.
 ## Layout
 
 ```
-config/            Django project (settings, urls, wsgi/asgi)
-accounts/          User (OIDC sub), API keys, OIDC backend
-authz/             control plane: OpenFGA wrapper, check/list/grant API, audit
-  services/fga.py  the single integration point with OpenFGA
-fga/model.fga      the authorization model (see docs/002)
-compose.yml        db + openfga + openfga-db + web + utility
+config/                  Django project (settings, urls, wsgi/asgi)
+accounts/                User (IdP `sub`), API keys, OIDC backend, management commands
+authz/
+  api.py                 check / list-objects / grants endpoints
+  policy.py              who may call the control plane (ADR 0004)
+  services/fga.py        the single integration point with OpenFGA
+  services/grants.py     audited grant/revoke: audit row first, then the engine
+  services/inspector.py  read-only store inspector behind /admin/fga/
+fga/                     model.fga, its compiled model.json, model tests, demo tuples
+compose.yml              db, openfga, openfga-db, web, utility
 ```
 
-## Status
+## Operating it
 
-Scaffold. Not yet run end-to-end — `just bootstrap` will generate `uv.lock` and
-pull dependencies on first use. The OpenFGA SDK call surface in
-`authz/services/fga.py` should be confirmed against the pinned version.
+```shell
+just manage grant_platform_role admin <sub>      # an operator: may manage any project's roles
+just manage grant_platform_role delegate <sub>   # a service allowed to act for end users
+just manage provision_user <username> --sub <sub>
+just manage create_api_key <username> --sub <sub>
+just manage reconcile_grant_audit [--dry-run]    # settle audit rows left pending
+```
+
+## Tests
+
+```shell
+just test                # Django tests (fake OpenFGA client, real Postgres)
+just fga-model-test      # model decisions, offline
+```

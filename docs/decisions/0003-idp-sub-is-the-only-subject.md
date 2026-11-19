@@ -86,3 +86,10 @@ user.
   universally true, but re-introduces a second identity authority: the whole
   point is that one issuer mints subjects. It also leaves "which authority does
   this sub come from?" unanswerable from the id alone.
+
+## Update — 2026-11
+
+The "grants cannot precede first login" consequence is mitigated:
+`manage.py provision_user <username> --sub <sub>` creates the user from the
+IdP's `sub` ahead of login (issue #4, PR #8). Looking up the `sub` from an
+email address automatically is issue #9.

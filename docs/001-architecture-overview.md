@@ -1,111 +1,92 @@
 # 001 — Architecture overview
 
-## What gx-auth is (and is not)
+## What gx-auth is
 
-`gx-auth` is a shared **authorization** service. It answers one question for the
-rest of the platform:
+gx-auth answers one question for the services of a genomics platform:
 
-> Can subject `S` perform action `A` on resource `R`?
+> May subject `S` perform action `A` on resource `R`?
 
-It is **not** an authentication service and **not** an identity provider. Login,
-MFA, the user directory, and token issuance stay with the cloud IdP (AWS Cognito
-today; Azure Entra ID is a supported future pivot — see doc 004).
+It is an **authorization** service only. Login, MFA, the user directory and
+token issuance belong to the cloud identity provider (IdP): AWS Cognito today,
+possibly Azure Entra ID later (doc 004).
 
-This separation is the single most important design decision in the system.
-Authentication answers *"who are you"*; authorization answers *"what may you
-do"*. Conflating them is what makes the incumbent designs hard to evolve. By
-keeping them apart:
+Keeping authentication and authorization apart is the central design choice:
 
-- the IdP stays swappable (Cognito ↔ Entra is a config change, not a rewrite);
-- authorization logic can be as expressive as the domain needs, without being
-  constrained by what fits in a JWT claim.
+- the IdP stays swappable, because nothing about permissions lives in it;
+- authorization can be as expressive as the domain needs, rather than whatever
+  fits in a token claim.
 
-## The two-layer shape
-
-A "authorization service" actually splits into two layers here:
+## Two layers
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  gx-auth (this repo) — the CONTROL PLANE (Django Ninja)           │
-│  • owns the authorization model (the .fga schema)                 │
-│  • domain-level grant/revoke API ("add U as editor on project P") │
-│  • tuple sync from services' resources -> OpenFGA                 │
-│  • audit log of grants and (optionally) decisions                 │
-│  • admin surface                                                  │
-└───────────────┬───────────────────────────────────────────────────┘
-                │ manages / writes
-                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  OpenFGA — the DECISION ENGINE / DATA PLANE                       │
-│  • stores relationship tuples (study:abc#editor@user:xyz)         │
-│  • answers Check / ListObjects in low single-digit ms             │
-│  • backed by its own Postgres                                     │
-└─────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│ gx-auth — control plane (Django + django-ninja)           │
+│  • owns the authorization model (src/fga/model.fga)       │
+│  • grant/revoke API: "make U an admin of project P"       │
+│  • authorizes its own callers (ADR 0004)                  │
+│  • audit log of every grant and revoke                    │
+│  • admin UI, including a read-only store inspector        │
+└──────────────────────────┬────────────────────────────────┘
+                           │ writes tuples, asks questions
+                           ▼
+┌───────────────────────────────────────────────────────────┐
+│ OpenFGA — decision engine                                 │
+│  • stores relationship tuples (project:p1#admin@user:abc) │
+│  • answers Check / ListObjects                            │
+│  • its own Postgres database                              │
+└───────────────────────────────────────────────────────────┘
 ```
 
-We do **not** reimplement the decision engine. OpenFGA is the engine; `gx-auth`
-is the domain-aware wrapper, sync layer, and admin/audit surface around it.
+gx-auth does not make decisions itself. OpenFGA is the engine; gx-auth is the
+domain-aware layer around it. The wrapper is kept thin
+(`authz/services/fga.py`) so the engine could be swapped, with SpiceDB as the
+fallback (ADR 0001).
 
-## Target topology
+## How services use it
 
 ```
-   AWS Cognito / Azure Entra ID
-        │  OIDC (identity only: sub, email, coarse role)
-        ▼
-  ┌───────────┐   ┌───────────┐   ┌─────────────┐
-  │ Service A │   │ Service B │   │  (future…)  │   each validates the OIDC
-  └─────┬─────┘   └─────┬─────┘   └──────┬──────┘   token itself; enforcement
-        │ Check(...)    │ Check(...)     │ Check    stays inside each service
-        └───────────────┴────────────────┴──────────┐
-                                                     ▼
-                                              ┌────────────┐
-                     grant/revoke, model  ───▶│   OpenFGA  │◀── tuple writes
-                     (via gx-auth control      └────────────┘    (from gx-auth)
-                      plane)
+  Cognito / Entra ── OIDC token (identity only) ──▶ each service
+                                                        │
+             ┌──────────────────────────────────────────┤
+             │ reads: Check / ListObjects               │ writes: grant / revoke
+             ▼                                          ▼
+          OpenFGA  ◀──────── tuple writes ──────────  gx-auth
 ```
 
-Two integration paths, deliberately different:
+- **Reads (the hot path).** A service validates the user's token, then asks
+  OpenFGA directly at each enforcement point. There is no extra hop, and
+  gx-auth stays off the critical path.
+- **Writes (the management path).** Role grants and revokes go through
+  gx-auth, which authorizes the caller, writes the tuple and records an audit
+  row.
 
-- **Hot path (reads):** services call OpenFGA's `Check` directly at their
-  enforcement points. Low latency, no extra hop, and it keeps `gx-auth` off the
-  critical request path so it is not a single point of failure for every request.
-- **Management path (writes):** grants, revocations, and model changes go
-  **through the `gx-auth` control plane**, which translates domain operations
-  into tuple writes, records an audit trail, and gives us one place to swap the
-  engine if ever needed.
+Enforcement stays inside each service. gx-auth provides a shared answer, not a
+shared gateway.
 
-## The cloud-neutral constraint
+> **Open:** direct engine access is only safe once OpenFGA requires
+> credentials. Today anything that can reach it can also *write* to it. See
+> [STATUS.md](./STATUS.md).
 
-AWS/Cognito is the near-term target, but the design must survive a pivot to
-Azure/Entra. Two consequences shape the whole system:
+## Constraints
 
-1. **The authorization engine must be self-hostable and cloud-agnostic.** This
-   rules out AWS-locked engines (Amazon Verified Permissions / Cedar). OpenFGA
-   runs anywhere on a standard Postgres. See
-   [ADR 0001](./decisions/0001-use-openfga-rebac.md).
-2. **Authorization must live entirely in gx-auth/OpenFGA, never in the IdP.** No
-   permissions baked into Cognito groups or a Pre-Token-Generation Lambda. The
-   token carries identity only. See
-   [ADR 0002](./decisions/0002-cloud-neutral-identity.md) and doc 004.
+1. **Cloud-neutral.** The engine must be self-hostable, which rules out
+   AWS-only options such as Amazon Verified Permissions. OpenFGA runs anywhere
+   on Postgres (ADR 0001).
+2. **No authorization in the IdP.** No permissions in Cognito groups or in
+   token-enrichment Lambdas. Tokens carry identity only (ADR 0002, doc 004).
 
-## Why ReBAC fits the domain
+## Why relationship-based access control
 
-The genomics data model is deeply hierarchical and relationship-shaped:
-
-- GX Core: a recursive `Project` tree, with `Sample` as an umbrella over
-  `BioSample` / `Library` / `SequencedLibrary`, plus `ConsensusSequence` /
-  `Assembly` / `Alignment`, and `AnalysisRun` → `AnalysisOutput`.
-- SMS: flat `Project` → `Sample`, with role- and access-level-based scoping.
-
-Access naturally follows the data graph: "an editor of a project can edit every
-sample under it" is one rule, not thousands of per-object grants. That is exactly
-what relationship-based access control (ReBAC / Google Zanzibar) expresses well,
-and why OpenFGA is a better fit than a flat scope/role model (like Ego's
-`policy.READ` scopes). The full model is in doc 002.
+Access in this domain follows the data. Projects nest, and samples and
+analysis outputs belong to projects. "An admin of a project can manage
+everything under it" is one rule in a relationship-based model, rather than
+thousands of per-object grants. That is what OpenFGA (a Zanzibar-style engine)
+expresses well. Doc 002 has the model.
 
 ## Rollout
 
-Do not big-bang this. Services keep their built-in authorization for the short/medium
-term. Stand up `gx-auth` + OpenFGA and create experimental proof-of-concept client services.
-Prove the tuple-sync strategy and `ListObjects` performance there, then migrate
-other services later once the pattern is battle-tested.
+Not a big-bang migration. Existing services keep their own authorization. New
+services prove the pattern first; sequence-data-submission-service is the
+first consumer, through its pluggable `gxauth` backend. Services migrate only
+once the two risks in doc 003 are understood: keeping tuples in sync, and
+`ListObjects` performance.
